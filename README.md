@@ -24,7 +24,7 @@ Zero dependencies. No npm packages. Just Bun, Metal, and ~2500 lines of JavaScri
 ## Quick start
 
 ```sh
-git clone https://github.com/user/smith.git
+git clone https://github.com/fredrikpaulin/smith.git
 cd smith
 bash build.sh
 bun test tests/
