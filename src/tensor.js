@@ -149,6 +149,10 @@ function getValue(t, index) {
   return t.data[index]
 }
 
+function setValue(t, index, value) {
+  t.data[index] = t.dtype === 'f16' ? toFloat16(value) : value
+}
+
 function toArray(t) {
   if (!t.data) throw new Error('Cannot read from private (GPU-only) tensor')
   const flat = new Array(t.size)
@@ -241,6 +245,7 @@ export {
 
   // Access
   getValue,
+  setValue,
   toArray,
   toString,
   byteSize,

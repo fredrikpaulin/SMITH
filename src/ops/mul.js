@@ -3,12 +3,12 @@
 // Backward: addGrad(a, grad * b), addGrad(b, grad * a)
 
 import * as T from '../tensor.js'
-import { run, runElementwise, broadcastParams, scaleParams } from '../dispatch.js'
+import { run, runElementwise, broadcastParams, scaleParams, k } from '../dispatch.js'
 import { computeBroadcastStrides } from './add.js'
 
 function gpuMul(a, b) {
   const out = T.create(a.shape, a.dtype)
-  runElementwise('elementwise_mul', [
+  runElementwise(k('elementwise_mul', a.dtype), [
     { buffer: a.buffer, index: 0 },
     { buffer: b.buffer, index: 1 },
     { buffer: out.buffer, index: 2 },
@@ -25,7 +25,7 @@ function gpuBroadcastMul(a, b) {
   const bStrides = computeBroadcastStrides(b.shape, outShape)
   const params = broadcastParams(outShape, aStrides, bStrides, outSize)
 
-  run('broadcast_mul', [
+  run(k('broadcast_mul', a.dtype), [
     { buffer: a.buffer, index: 0 },
     { buffer: b.buffer, index: 1 },
     { buffer: out.buffer, index: 2 },
@@ -41,7 +41,7 @@ function mul(a, b) {
 // Scalar multiply
 function scale(a, s) {
   const out = T.create(a.shape, a.dtype)
-  run('elementwise_scale', [
+  run(k('elementwise_scale', a.dtype), [
     { buffer: a.buffer, index: 0 },
     { buffer: out.buffer, index: 1 },
   ], { x: a.size }, null, { data: scaleParams(s), index: 2 })
@@ -50,7 +50,7 @@ function scale(a, s) {
 
 function neg(a) {
   const out = T.create(a.shape, a.dtype)
-  runElementwise('elementwise_neg', [
+  runElementwise(k('elementwise_neg', a.dtype), [
     { buffer: a.buffer, index: 0 },
     { buffer: out.buffer, index: 1 },
   ], a.size)

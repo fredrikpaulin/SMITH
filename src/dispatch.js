@@ -81,6 +81,11 @@ function scaleParams(value) {
   return new Float32Array([value])
 }
 
+// Kernel name resolver: appends _f16 suffix for half-precision tensors
+function k(baseName, dtype) {
+  return dtype === 'f16' ? baseName + '_f16' : baseName
+}
+
 export {
   run,
   runElementwise,
@@ -90,4 +95,5 @@ export {
   broadcastParams,
   scaleParams,
   GROUP_1D,
+  k,
 }

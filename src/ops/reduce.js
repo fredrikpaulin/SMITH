@@ -3,7 +3,7 @@
 // Uses parallel reduction shaders.
 
 import * as T from '../tensor.js'
-import { run, axisReduceParams, scaleParams, GROUP_1D } from '../dispatch.js'
+import { run, axisReduceParams, scaleParams, GROUP_1D, k } from '../dispatch.js'
 
 // Sum along a specific axis
 function sumAxis(input, axis) {
@@ -20,7 +20,7 @@ function sumAxis(input, axis) {
   const out = T.create(outShape.length ? outShape : [], input.dtype)
   const params = axisReduceParams(outer, input.shape[axis], inner)
 
-  run('reduce_sum_axis', [
+  run(k('reduce_sum_axis', input.dtype), [
     { buffer: input.buffer, index: 0 },
     { buffer: out.buffer, index: 1 },
   ], { x: outSize }, { x: Math.min(outSize, GROUP_1D) },
@@ -43,7 +43,7 @@ function maxAxis(input, axis) {
   const out = T.create(outShape.length ? outShape : [], input.dtype)
   const params = axisReduceParams(outer, input.shape[axis], inner)
 
-  run('reduce_max_axis', [
+  run(k('reduce_max_axis', input.dtype), [
     { buffer: input.buffer, index: 0 },
     { buffer: out.buffer, index: 1 },
   ], { x: outSize }, { x: Math.min(outSize, GROUP_1D) },
@@ -86,7 +86,7 @@ function mean(input, axis) {
     : input.shape[axis < 0 ? axis + input.shape.length : axis]
   // scale by 1/n — inline dispatch to avoid circular import
   const out = T.create(s.shape, s.dtype)
-  run('elementwise_scale', [
+  run(k('elementwise_scale', s.dtype), [
     { buffer: s.buffer, index: 0 },
     { buffer: out.buffer, index: 1 },
   ], { x: s.size }, null, { data: scaleParams(1 / n), index: 2 })

@@ -161,3 +161,95 @@ kernel void layernorm_backward(
     dx[i] = inv_std * (dxh - dxhat_mean - xh[i] * dxhat_xhat_mean);
   }
 }
+
+// ============================================================
+// f16 variants — half I/O, f32 accumulation for mean/variance
+// ============================================================
+
+kernel void layernorm_forward_f16(
+  device const half *input  [[buffer(0)]],
+  device const half *gamma  [[buffer(1)]],
+  device const half *beta   [[buffer(2)]],
+  device half *output       [[buffer(3)]],
+  device half *xhat_out     [[buffer(4)]],
+  constant LayerNormParams &p [[buffer(5)]],
+  uint row [[threadgroup_position_in_grid]], uint tid [[thread_index_in_threadgroup]], uint tpg [[threads_per_threadgroup]]
+) {
+  if (row >= p.rows) return;
+  device const half *x = input + row * p.cols;
+  device half *y = output + row * p.cols;
+  device half *xh = xhat_out + row * p.cols;
+  threadgroup float shared[256];
+
+  float local_sum = 0.0f;
+  for (uint i = tid; i < p.cols; i += tpg) local_sum += float(x[i]);
+  shared[tid] = local_sum;
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  for (uint s = tpg / 2; s > 0; s >>= 1) { if (tid < s) shared[tid] += shared[tid + s]; threadgroup_barrier(mem_flags::mem_threadgroup); }
+  float mean = shared[0] / float(p.cols);
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  float local_var = 0.0f;
+  for (uint i = tid; i < p.cols; i += tpg) { float d = float(x[i]) - mean; local_var += d * d; }
+  shared[tid] = local_var;
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  for (uint s = tpg / 2; s > 0; s >>= 1) { if (tid < s) shared[tid] += shared[tid + s]; threadgroup_barrier(mem_flags::mem_threadgroup); }
+  float inv_std = rsqrt(shared[0] / float(p.cols) + p.eps);
+
+  for (uint i = tid; i < p.cols; i += tpg) {
+    float xhat_val = (float(x[i]) - mean) * inv_std;
+    xh[i] = half(xhat_val);
+    y[i] = half(float(gamma[i]) * xhat_val + float(beta[i]));
+  }
+}
+
+kernel void layernorm_backward_f16(
+  device const half *grad_out [[buffer(0)]],
+  device const half *xhat     [[buffer(1)]],
+  device const half *gamma    [[buffer(2)]],
+  device const half *input    [[buffer(3)]],
+  device half *grad_input     [[buffer(4)]],
+  device half *grad_gamma     [[buffer(5)]],
+  device half *grad_beta      [[buffer(6)]],
+  constant LayerNormParams &p [[buffer(7)]],
+  uint row [[threadgroup_position_in_grid]], uint tid [[thread_index_in_threadgroup]], uint tpg [[threads_per_threadgroup]]
+) {
+  if (row >= p.rows) return;
+  device const half *dy = grad_out + row * p.cols;
+  device const half *xh = xhat + row * p.cols;
+  device half *dx = grad_input + row * p.cols;
+  threadgroup float shared[256];
+  threadgroup float shared2[256];
+  float D = float(p.cols);
+
+  float local_dxhat_sum = 0.0f, local_dxhat_xhat_sum = 0.0f;
+  for (uint i = tid; i < p.cols; i += tpg) {
+    float dxh = float(dy[i]) * float(gamma[i]);
+    local_dxhat_sum += dxh;
+    local_dxhat_xhat_sum += dxh * float(xh[i]);
+  }
+  shared[tid] = local_dxhat_sum; shared2[tid] = local_dxhat_xhat_sum;
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  for (uint s = tpg / 2; s > 0; s >>= 1) { if (tid < s) { shared[tid] += shared[tid + s]; shared2[tid] += shared2[tid + s]; } threadgroup_barrier(mem_flags::mem_threadgroup); }
+  float dxhat_mean = shared[0] / D, dxhat_xhat_mean = shared2[0] / D;
+
+  float local_sum = 0.0f;
+  for (uint i = tid; i < p.cols; i += tpg) local_sum += float(input[i + row * p.cols]);
+  shared[tid] = local_sum;
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  for (uint s = tpg / 2; s > 0; s >>= 1) { if (tid < s) shared[tid] += shared[tid + s]; threadgroup_barrier(mem_flags::mem_threadgroup); }
+  float mean = shared[0] / D;
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  float local_var = 0.0f;
+  for (uint i = tid; i < p.cols; i += tpg) { float d = float(input[i + row * p.cols]) - mean; local_var += d * d; }
+  shared[tid] = local_var;
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  for (uint s = tpg / 2; s > 0; s >>= 1) { if (tid < s) shared[tid] += shared[tid + s]; threadgroup_barrier(mem_flags::mem_threadgroup); }
+  float inv_std = rsqrt(shared[0] / D + p.eps);
+
+  for (uint i = tid; i < p.cols; i += tpg) {
+    float dxh = float(dy[i]) * float(gamma[i]);
+    dx[i] = half(inv_std * (dxh - dxhat_mean - float(xh[i]) * dxhat_xhat_mean));
+  }
+}

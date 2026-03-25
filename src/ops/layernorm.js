@@ -2,7 +2,7 @@
 // GPU layer normalization along the last dimension.
 
 import * as T from '../tensor.js'
-import { run } from '../dispatch.js'
+import { run, k } from '../dispatch.js'
 
 function layernormForward(input, gamma, beta, eps = 1e-5) {
   const ndim = input.shape.length
@@ -23,7 +23,7 @@ function layernormForward(input, gamma, beta, eps = 1e-5) {
 
   const tpg = 1 << Math.ceil(Math.log2(Math.max(Math.min(cols, 256), 2)))
 
-  run('layernorm_forward', [
+  run(k('layernorm_forward', input.dtype), [
     { buffer: input.buffer, index: 0 },
     { buffer: gamma.buffer, index: 1 },
     { buffer: beta.buffer, index: 2 },
@@ -48,12 +48,21 @@ function layernormBackward(gradOut, xhat, gamma, input, eps = 1e-5) {
   const gradBeta = T.create(gamma.shape, gamma.dtype)
 
   // CPU accumulation for grad_gamma and grad_beta
+  // Use f32 accumulators then write back (handles both f32 and f16 dtypes)
+  const ggAcc = new Float32Array(cols)
+  const gbAcc = new Float32Array(cols)
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       const idx = r * cols + c
-      gradGamma.data[c] += gradOut.data[idx] * xhat.data[idx]
-      gradBeta.data[c] += gradOut.data[idx]
+      const go = T.getValue(gradOut, idx)
+      const xh = T.getValue(xhat, idx)
+      ggAcc[c] += go * xh
+      gbAcc[c] += go
     }
+  }
+  for (let c = 0; c < cols; c++) {
+    T.setValue(gradGamma, c, ggAcc[c])
+    T.setValue(gradBeta, c, gbAcc[c])
   }
 
   // GPU backward for grad_input
@@ -67,7 +76,7 @@ function layernormBackward(gradOut, xhat, gamma, input, eps = 1e-5) {
 
   const tpg = 1 << Math.ceil(Math.log2(Math.max(Math.min(cols, 256), 2)))
 
-  run('layernorm_backward', [
+  run(k('layernorm_backward', input.dtype), [
     { buffer: gradOut.buffer, index: 0 },
     { buffer: xhat.buffer, index: 1 },
     { buffer: gamma.buffer, index: 2 },

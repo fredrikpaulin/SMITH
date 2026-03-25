@@ -11,9 +11,13 @@ import { forwardCached, forwardFlash } from './model.js'
 import * as tokenizer from './tokenizer.js'
 import * as gen from './generate.js'
 import * as ckpt from './checkpoint.js'
-import { quantizeQ4, matmulQ4 } from './ops/quantize.js'
+import { quantizeQ4, matmulQ4, matmulQ8 } from './ops/quantize.js'
+import { loadGGUF } from './gguf_loader.js'
+import { parseGGUF, listTensors as listGGUFTensors, extractConfig as extractGGUFConfig } from './gguf.js'
 import { poolStats, poolDrain } from './pool.js'
 import { dtypeBytes, toFloat16, fromFloat16, float32ToFloat16, float16ToFloat32 } from './dtype.js'
+import { f16Mode, defaultDtype, createLossScaler } from './f16mode.js'
+import { cast } from './ops/cast.js'
 import {
   parseSafetensors, readTensor, listTensors,
   loadSafetensors, loadGPT2Safetensors,
@@ -107,7 +111,10 @@ const smith = {
   mapGPT2Weights,
 
   // Quantization
-  quantizeQ4, matmulQ4,
+  quantizeQ4, matmulQ4, matmulQ8,
+
+  // GGUF
+  loadGGUF, parseGGUF, listGGUFTensors, extractGGUFConfig,
 
   // Optimizer
   createAdamW, adamwStep,
@@ -122,6 +129,12 @@ const smith = {
 
   // Dtype utilities
   dtypeBytes, toFloat16, fromFloat16, float32ToFloat16, float16ToFloat32,
+
+  // Mixed precision
+  f16Mode, defaultDtype, cast, createLossScaler,
+
+  // GGUF
+  loadGGUF, parseGGUF, listGGUFTensors, extractGGUFConfig,
 }
 
 export default smith
@@ -151,4 +164,7 @@ export {
   createSchedule, getLr,
   clipGradNorm,
   info, poolStats, poolDrain,
+  f16Mode, defaultDtype, cast, createLossScaler,
+  loadGGUF, parseGGUF, listGGUFTensors, extractGGUFConfig,
+  matmulQ8,
 }

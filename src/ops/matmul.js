@@ -4,7 +4,7 @@
 // Supports batched matmul for attention heads etc.
 
 import * as T from '../tensor.js'
-import { run, matmulParams, batchMatmulParams } from '../dispatch.js'
+import { run, matmulParams, batchMatmulParams, k } from '../dispatch.js'
 
 // Threshold: use tiled kernel for matrices larger than this
 const TILE_THRESHOLD = 64
@@ -30,7 +30,7 @@ function matmul2d(a_, b_) {
     // Grid: one threadgroup per 32x32 tile of the output
     const groupsX = Math.ceil(N / 32)
     const groupsY = Math.ceil(M / 32)
-    run('matmul_f32', [
+    run(a.dtype === 'f16' ? 'matmul_f16' : 'matmul_f32', [
       { buffer: a.buffer, index: 0 },
       { buffer: b.buffer, index: 1 },
       { buffer: out.buffer, index: 2 },
@@ -42,7 +42,7 @@ function matmul2d(a_, b_) {
     { data: params, index: 3 })
   } else {
     // Simple kernel: one thread per output element
-    run('matmul_simple', [
+    run(k('matmul_simple', a.dtype), [
       { buffer: a.buffer, index: 0 },
       { buffer: b.buffer, index: 1 },
       { buffer: out.buffer, index: 2 },
@@ -65,7 +65,7 @@ function matmulBatched(a_, b_, batchSize) {
   const out = T.create(outShape, a.dtype)
   const params = batchMatmulParams(M, N, K, batchSize)
 
-  run('matmul_batched', [
+  run(k('matmul_batched', a.dtype), [
     { buffer: a.buffer, index: 0 },
     { buffer: b.buffer, index: 1 },
     { buffer: out.buffer, index: 2 },

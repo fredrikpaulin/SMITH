@@ -4,7 +4,7 @@
 // Backward: recomputes attention from saved log-sum-exp stats.
 
 import * as T from '../tensor.js'
-import { run } from '../dispatch.js'
+import { run, k } from '../dispatch.js'
 
 // Tile sizes must match the shader constants
 const Br = 32
@@ -38,15 +38,15 @@ function flashAttentionForward(Q_, K_, V_, causal = true) {
   const scale = 1.0 / Math.sqrt(d)
 
   const O = T.create([numHeads, N, d], Q.dtype)
-  const L = T.create([numHeads, N], Q.dtype)     // row sums
-  const M = T.create([numHeads, N], Q.dtype)     // row maxes
+  const L = T.create([numHeads, N], 'f32')     // row sums (always f32 for precision)
+  const M = T.create([numHeads, N], 'f32')     // row maxes (always f32 for precision)
 
   const params = flashAttnParams(N, d, numHeads, scale, causal)
 
   const numRowBlocks = Math.ceil(N / Br)
   const tpg = Math.min(Bc, 32) // threads per group — kept small for register pressure
 
-  run('flash_attention_forward', [
+  run(k('flash_attention_forward', Q.dtype), [
     { buffer: Q.buffer, index: 0 },
     { buffer: K.buffer, index: 1 },
     { buffer: V.buffer, index: 2 },
@@ -86,7 +86,7 @@ function flashAttentionBackward(Q_, K_, V_, O_, dO_, L_, M_, causal = true) {
   const numRowBlocks = Math.ceil(N / Br)
   const tpg = Math.min(Bc, 32)
 
-  run('flash_attention_backward', [
+  run(k('flash_attention_backward', Q.dtype), [
     { buffer: Q.buffer, index: 0 },
     { buffer: K.buffer, index: 1 },
     { buffer: V.buffer, index: 2 },

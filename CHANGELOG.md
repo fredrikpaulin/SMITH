@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.9.0 — Phase 9: GGUF Import (2026-03-25)
+
+### Added
+
+- **GGUF parser** (`src/gguf.js`) — Full binary parser for GGUF v2/v3. Reads header, metadata KV pairs (all types), tensor info, aligned data section. Supports GGML types: F32, F16, BF16, Q4_0, Q4_1, Q8_0, Q8_1.
+- **Dequantization** (`src/gguf.js`) — Block dequantizers for Q4_0, Q4_1, Q8_0. F16/BF16 decode to f32.
+- **Architecture mapping** (`src/gguf_loader.js`) — Weight name maps for Llama, Phi, GPT-2. Handles weight transposition (GGUF [outDim, inDim] → Smith [inDim, outDim]).
+- **Llama forward** (`src/gguf_loader.js`) — RMSNorm, RoPE, SwiGLU, GQA, flash attention, weight-tied output head.
+- **RoPE** — Precomputed cos/sin tables with configurable frequency base.
+- **RMSNorm** — Llama-style normalization (no mean subtraction, no beta).
+- **SwiGLU FFN** — Gated FFN with SiLU activation (gate, up, down projections).
+- **GQA** — KV head repetition for grouped query attention.
+- **Q8 matmul** (`shaders/matmul_q8.metal`, `src/ops/quantize.js`) — 8-bit quantized matmul with fp16 per-block scale.
+- **`loadGGUF(path)`** — Top-level async loader: parse → config → model → weights → forward function.
+- **Tests** (`tests/gguf.test.js`) — Synthetic GGUF builder, parser verification, dequantization, config extraction, weight mapping, RoPE, RMSNorm.
+
+## 0.8.0 — Phase 8: Mixed Precision f16 Compute (2026-03-25)
+
+### Added
+
+- **f16 Metal shader variants** — All compute shaders now have `_f16` variants: elementwise (add, sub, mul, div, scale, fill, neg), activations (relu, gelu, silu, sigmoid, tanh, exp, log, sqrt + backward), matmul (simple, tiled, batched), softmax, layernorm (forward + backward), reduce (sum, max, axis variants), flash attention (forward + backward), broadcast ops, dtype cast kernels (`cast_f32_to_f16`, `cast_f16_to_f32`). All f16 variants use half I/O with f32 accumulators for numerical stability.
+- **Dtype-based kernel dispatch** (`src/dispatch.js`) — `k(baseName, dtype)` appends `_f16` suffix when dispatching half-precision tensors. All op files updated to use this.
+- **Cast op** (`src/ops/cast.js`) — `cast(tensor, targetDtype)` for f32↔f16 conversion via GPU kernels.
+- **f16 mode toggle** (`src/f16mode.js`) — `f16Mode(enabled)` global toggle, `defaultDtype()` returns `'f16'` when enabled.
+- **Dynamic loss scaler** (`src/f16mode.js`) — `createLossScaler(opts)` for mixed precision training. Starts high (2^16), halves on NaN/Inf, doubles after consecutive good steps.
+- **Tensor setValue** (`src/tensor.js`) — `setValue(t, index, value)` handles f16 encode/decode.
+- **Tests** (`tests/f16.test.js`) — f16 tensor creation, cast roundtrip, elementwise ops, matmul (accuracy vs f32), activations, softmax, layernorm, reduce, f16Mode toggle, loss scaler (basic operation, NaN detection, min scale floor).
+
+### Fixed
+
+- **Layernorm backward CPU loop** — grad_gamma/grad_beta accumulation now uses f32 accumulators with `getValue`/`setValue`, handling f16 tensors correctly.
+- **Flash attention L/M stats** — Always allocated as f32 regardless of input dtype (reduction stats need full precision).
+
 ## 0.7.0 — Phase 7: Flash Attention (2026-03-25)
 
 ### Added

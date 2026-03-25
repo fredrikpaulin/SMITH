@@ -2,12 +2,12 @@
 // Element-wise subtraction with broadcasting support.
 
 import * as T from '../tensor.js'
-import { run, runElementwise, broadcastParams } from '../dispatch.js'
+import { run, runElementwise, broadcastParams, k } from '../dispatch.js'
 import { computeBroadcastStrides } from './add.js'
 
 function gpuSub(a, b) {
   const out = T.create(a.shape, a.dtype)
-  runElementwise('elementwise_sub', [
+  runElementwise(k('elementwise_sub', a.dtype), [
     { buffer: a.buffer, index: 0 },
     { buffer: b.buffer, index: 1 },
     { buffer: out.buffer, index: 2 },
@@ -22,7 +22,7 @@ function gpuBroadcastSub(a, b) {
   const aStrides = computeBroadcastStrides(a.shape, outShape)
   const bStrides = computeBroadcastStrides(b.shape, outShape)
   const params = broadcastParams(outShape, aStrides, bStrides, outSize)
-  run('broadcast_sub', [
+  run(k('broadcast_sub', a.dtype), [
     { buffer: a.buffer, index: 0 },
     { buffer: b.buffer, index: 1 },
     { buffer: out.buffer, index: 2 },

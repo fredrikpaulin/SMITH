@@ -165,3 +165,98 @@ kernel void matmul_batched(
     }
     C[cOff + row * p.N + col] = sum;
 }
+
+// ============================================================
+// f16 variants — half I/O, float accumulators for numerical stability
+// ============================================================
+
+kernel void matmul_f16(
+    device const half* A        [[buffer(0)]],
+    device const half* B        [[buffer(1)]],
+    device half* C              [[buffer(2)]],
+    constant MatmulParams& p    [[buffer(3)]],
+    threadgroup float* shared   [[threadgroup(0)]],
+    uint2 group_id              [[threadgroup_position_in_grid]],
+    uint tid_in_group           [[thread_index_in_threadgroup]])
+{
+    threadgroup float* As = shared;
+    threadgroup float* Bs = shared + TILE_M * TILE_K;
+
+    uint M = p.M, N = p.N, K = p.K;
+    uint thread_row = (tid_in_group / (TILE_N / THREAD_N)) * THREAD_M;
+    uint thread_col = (tid_in_group % (TILE_N / THREAD_N)) * THREAD_N;
+    uint row0 = group_id.y * TILE_M;
+    uint col0 = group_id.x * TILE_N;
+
+    float acc[THREAD_M][THREAD_N];
+    for (uint i = 0; i < THREAD_M; i++)
+        for (uint j = 0; j < THREAD_N; j++)
+            acc[i][j] = 0.0f;
+
+    uint numTiles = (K + TILE_K - 1) / TILE_K;
+    for (uint t = 0; t < numTiles; t++) {
+        uint k0 = t * TILE_K;
+        uint elems_A = TILE_M * TILE_K;
+        for (uint i = tid_in_group; i < elems_A; i += THREADS_PER_GROUP) {
+            uint r = i / TILE_K, c = i % TILE_K;
+            uint gr = row0 + r, gc = k0 + c;
+            As[r * TILE_K + c] = (gr < M && gc < K) ? float(A[gr * K + gc]) : 0.0f;
+        }
+        uint elems_B = TILE_K * TILE_N;
+        for (uint i = tid_in_group; i < elems_B; i += THREADS_PER_GROUP) {
+            uint r = i / TILE_N, c = i % TILE_N;
+            uint gr = k0 + r, gc = col0 + c;
+            Bs[r * TILE_N + c] = (gr < K && gc < N) ? float(B[gr * N + gc]) : 0.0f;
+        }
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+
+        for (uint k = 0; k < TILE_K; k++) {
+            for (uint i = 0; i < THREAD_M; i++) {
+                float a_val = As[(thread_row + i) * TILE_K + k];
+                for (uint j = 0; j < THREAD_N; j++) {
+                    acc[i][j] += a_val * Bs[k * TILE_N + (thread_col + j)];
+                }
+            }
+        }
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+    }
+
+    for (uint i = 0; i < THREAD_M; i++) {
+        uint gr = row0 + thread_row + i;
+        if (gr >= M) continue;
+        for (uint j = 0; j < THREAD_N; j++) {
+            uint gc = col0 + thread_col + j;
+            if (gc >= N) continue;
+            C[gr * N + gc] = half(acc[i][j]);
+        }
+    }
+}
+
+kernel void matmul_simple_f16(
+    device const half* A        [[buffer(0)]],
+    device const half* B        [[buffer(1)]],
+    device half* C              [[buffer(2)]],
+    constant MatmulParams& p    [[buffer(3)]],
+    uint2 tid                   [[thread_position_in_grid]])
+{
+    uint row = tid.y, col = tid.x;
+    if (row >= p.M || col >= p.N) return;
+    float sum = 0.0f;
+    for (uint k = 0; k < p.K; k++) sum += float(A[row * p.K + k]) * float(B[k * p.N + col]);
+    C[row * p.N + col] = half(sum);
+}
+
+kernel void matmul_batched_f16(
+    device const half* A           [[buffer(0)]],
+    device const half* B           [[buffer(1)]],
+    device half* C                  [[buffer(2)]],
+    constant BatchMatmulParams& p   [[buffer(3)]],
+    uint3 tid                       [[thread_position_in_grid]])
+{
+    uint col = tid.x, row = tid.y, b = tid.z;
+    if (row >= p.M || col >= p.N || b >= p.batch) return;
+    uint aOff = b * p.M * p.K, bOff = b * p.K * p.N, cOff = b * p.M * p.N;
+    float sum = 0.0f;
+    for (uint k = 0; k < p.K; k++) sum += float(A[aOff + row * p.K + k]) * float(B[bOff + k * p.N + col]);
+    C[cOff + row * p.N + col] = half(sum);
+}

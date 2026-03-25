@@ -89,4 +89,32 @@ function matmulQ4(a, bQuant) {
   return out
 }
 
-export { quantizeQ4, matmulQ4, GROUP_SIZE, GROUP_BYTES }
+// --- Q8 matmul ---
+// Q8_0 block layout: 2 bytes fp16 scale + 32 bytes int8 = 34 bytes per block
+const Q8_BLOCK_SIZE = 32
+const Q8_BLOCK_BYTES = 34
+
+// Q8 matmul: C[M,N] = A[M,K](f32) @ B[K,N](q8)
+// bQuant: { buffer, K, N, groups }
+function matmulQ8(a, bQuant) {
+  const M = a.shape[0]
+  const { N, K, groups, buffer: bBuffer } = bQuant
+
+  if (a.shape[1] !== K) {
+    throw new Error(`matmulQ8: inner dims don't match: ${a.shape[1]} vs ${K}`)
+  }
+
+  const out = T.create([M, N], a.dtype)
+  const params = new Uint32Array([M, N, K, groups])
+
+  run('matmul_q8', [
+    { buffer: a.buffer, index: 0 },
+    { buffer: bBuffer, index: 1 },
+    { buffer: out.buffer, index: 2 },
+  ], { x: N, y: M }, { x: Math.min(N, 16), y: Math.min(M, 16) },
+  { data: params, index: 3 })
+
+  return out
+}
+
+export { quantizeQ4, matmulQ4, matmulQ8, GROUP_SIZE, GROUP_BYTES, Q8_BLOCK_SIZE, Q8_BLOCK_BYTES }

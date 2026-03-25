@@ -117,3 +117,54 @@ kernel void reduce_max_axis(
     }
     output[tid] = m;
 }
+
+// ============================================================
+// f16 variants — half I/O, f32 accumulators
+// Reduce output is also f16 (matches input dtype convention)
+// ============================================================
+
+kernel void reduce_sum_f16(
+    device const half* input [[buffer(0)]], device half* output [[buffer(1)]], constant uint& size [[buffer(2)]],
+    threadgroup float* shared [[threadgroup(0)]], uint tid [[thread_position_in_grid]], uint lid [[thread_index_in_threadgroup]],
+    uint group_id [[threadgroup_position_in_grid]], uint group_size [[threads_per_threadgroup]])
+{
+    shared[lid] = tid < size ? float(input[tid]) : 0.0f;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    for (uint stride = group_size / 2; stride > 0; stride >>= 1) { if (lid < stride) shared[lid] += shared[lid + stride]; threadgroup_barrier(mem_flags::mem_threadgroup); }
+    if (lid == 0) output[group_id] = half(shared[0]);
+}
+
+kernel void reduce_max_f16(
+    device const half* input [[buffer(0)]], device half* output [[buffer(1)]], constant uint& size [[buffer(2)]],
+    threadgroup float* shared [[threadgroup(0)]], uint tid [[thread_position_in_grid]], uint lid [[thread_index_in_threadgroup]],
+    uint group_id [[threadgroup_position_in_grid]], uint group_size [[threads_per_threadgroup]])
+{
+    shared[lid] = tid < size ? float(input[tid]) : -INFINITY;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    for (uint stride = group_size / 2; stride > 0; stride >>= 1) { if (lid < stride) shared[lid] = max(shared[lid], shared[lid + stride]); threadgroup_barrier(mem_flags::mem_threadgroup); }
+    if (lid == 0) output[group_id] = half(shared[0]);
+}
+
+kernel void reduce_sum_axis_f16(
+    device const half* input [[buffer(0)]], device half* output [[buffer(1)]], constant AxisReduceParams& p [[buffer(2)]], uint tid [[thread_position_in_grid]])
+{
+    uint out_size = p.outer * p.inner;
+    if (tid >= out_size) return;
+    uint outer_idx = tid / p.inner, inner_idx = tid % p.inner;
+    float sum = 0.0f;
+    uint base = outer_idx * p.axis_size * p.inner + inner_idx;
+    for (uint i = 0; i < p.axis_size; i++) sum += float(input[base + i * p.inner]);
+    output[tid] = half(sum);
+}
+
+kernel void reduce_max_axis_f16(
+    device const half* input [[buffer(0)]], device half* output [[buffer(1)]], constant AxisReduceParams& p [[buffer(2)]], uint tid [[thread_position_in_grid]])
+{
+    uint out_size = p.outer * p.inner;
+    if (tid >= out_size) return;
+    uint outer_idx = tid / p.inner, inner_idx = tid % p.inner;
+    float m = -INFINITY;
+    uint base = outer_idx * p.axis_size * p.inner + inner_idx;
+    for (uint i = 0; i < p.axis_size; i++) m = max(m, float(input[base + i * p.inner]));
+    output[tid] = half(m);
+}

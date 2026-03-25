@@ -3,12 +3,12 @@
 // Backward: addGrad(a, grad), addGrad(b, grad)
 
 import * as T from '../tensor.js'
-import { run, runElementwise, broadcastParams } from '../dispatch.js'
+import { run, runElementwise, broadcastParams, k } from '../dispatch.js'
 
 // GPU add for same-shape tensors (no broadcast)
 function gpuAdd(a, b) {
   const out = T.create(a.shape, a.dtype)
-  runElementwise('elementwise_add', [
+  runElementwise(k('elementwise_add', a.dtype), [
     { buffer: a.buffer, index: 0 },
     { buffer: b.buffer, index: 1 },
     { buffer: out.buffer, index: 2 },
@@ -27,7 +27,7 @@ function gpuBroadcastAdd(a, b) {
   const bStrides = computeBroadcastStrides(b.shape, outShape)
   const params = broadcastParams(outShape, aStrides, bStrides, outSize)
 
-  run('broadcast_add', [
+  run(k('broadcast_add', a.dtype), [
     { buffer: a.buffer, index: 0 },
     { buffer: b.buffer, index: 1 },
     { buffer: out.buffer, index: 2 },

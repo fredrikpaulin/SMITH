@@ -358,3 +358,218 @@ kernel void flash_attention_backward(
     dQh[(row_start + i) * d + k] += dQ_acc[idx];
   }
 }
+
+// ============================================================
+// f16 variants — half I/O, f32 internal computation
+// L and M are always f32 (softmax stats need full precision)
+// ============================================================
+
+kernel void flash_attention_forward_f16(
+  device const half* Q   [[buffer(0)]],
+  device const half* K   [[buffer(1)]],
+  device const half* V   [[buffer(2)]],
+  device half* O         [[buffer(3)]],
+  device float* L        [[buffer(4)]],
+  device float* M_out    [[buffer(5)]],
+  constant FlashAttnParams& p [[buffer(6)]],
+  uint3 pos              [[thread_position_in_grid]],
+  uint3 tpg_vec          [[threads_per_threadgroup]]
+) {
+  const uint tpg = tpg_vec.x;
+  const uint h = pos.x / tpg;
+  const uint tid = pos.x % tpg;
+  const uint block_row = pos.y;
+  const uint N = p.N, d = p.d;
+  const float scale = p.scale;
+
+  const uint row_start = block_row * Br;
+  const uint row_end = min(row_start + Br, N);
+  const uint num_rows = row_end - row_start;
+  if (num_rows == 0) return;
+
+  device const half* Qh = Q + h * N * d;
+  device const half* Kh = K + h * N * d;
+  device const half* Vh = V + h * N * d;
+  device half* Oh = O + h * N * d;
+  device float* Lh = L + h * N;
+  device float* Mh = M_out + h * N;
+
+  threadgroup float S_block[Br * Bc];
+  threadgroup float m_i[Br];
+  threadgroup float l_i[Br];
+  threadgroup float O_acc[Br * 128];
+
+  if (tid < num_rows) {
+    m_i[tid] = -INFINITY;
+    l_i[tid] = 0.0f;
+    for (uint j = 0; j < d; j++) O_acc[tid * d + j] = 0.0f;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  const uint num_col_blocks = (N + Bc - 1) / Bc;
+  for (uint col_block = 0; col_block < num_col_blocks; col_block++) {
+    const uint col_start = col_block * Bc;
+    const uint col_end = min(col_start + Bc, N);
+    const uint num_cols = col_end - col_start;
+    if (p.causal && col_start > row_end - 1) break;
+
+    for (uint idx = tid; idx < num_rows * num_cols; idx += tpg) {
+      uint i = idx / num_cols, j = idx % num_cols;
+      float dot = 0.0f;
+      for (uint k = 0; k < d; k++) dot += float(Qh[(row_start + i) * d + k]) * float(Kh[(col_start + j) * d + k]);
+      dot *= scale;
+      if (p.causal && (col_start + j) > (row_start + i)) dot = -INFINITY;
+      S_block[i * Bc + j] = dot;
+    }
+    for (uint idx = tid; idx < Br * Bc; idx += tpg) {
+      uint i = idx / Bc, j = idx % Bc;
+      if (i >= num_rows || j >= num_cols) S_block[idx] = -INFINITY;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    for (uint i = tid; i < num_rows; i += tpg) {
+      float m_ij = -INFINITY;
+      for (uint j = 0; j < num_cols; j++) m_ij = max(m_ij, S_block[i * Bc + j]);
+      float m_new = max(m_i[i], m_ij);
+      float alpha = exp(m_i[i] - m_new);
+      float l_new = l_i[i] * alpha;
+      float block_sum = 0.0f;
+      for (uint j = 0; j < num_cols; j++) {
+        float p_ij = exp(S_block[i * Bc + j] - m_new);
+        S_block[i * Bc + j] = p_ij;
+        block_sum += p_ij;
+      }
+      l_new += block_sum;
+      for (uint k = 0; k < d; k++) {
+        O_acc[i * d + k] = O_acc[i * d + k] * alpha;
+        float v_sum = 0.0f;
+        for (uint j = 0; j < num_cols; j++) v_sum += S_block[i * Bc + j] * float(Vh[(col_start + j) * d + k]);
+        O_acc[i * d + k] += v_sum;
+      }
+      m_i[i] = m_new;
+      l_i[i] = l_new;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+
+  for (uint i = tid; i < num_rows; i += tpg) {
+    float inv_l = 1.0f / l_i[i];
+    for (uint k = 0; k < d; k++) Oh[(row_start + i) * d + k] = half(O_acc[i * d + k] * inv_l);
+    Lh[row_start + i] = l_i[i];
+    Mh[row_start + i] = m_i[i];
+  }
+}
+
+kernel void flash_attention_backward_f16(
+  device const half* Q    [[buffer(0)]],
+  device const half* K    [[buffer(1)]],
+  device const half* V    [[buffer(2)]],
+  device const half* O    [[buffer(3)]],
+  device const half* dO   [[buffer(4)]],
+  device const float* L   [[buffer(5)]],
+  device const float* M_in [[buffer(6)]],
+  device half* dQ         [[buffer(7)]],
+  device half* dK         [[buffer(8)]],
+  device half* dV         [[buffer(9)]],
+  constant FlashAttnParams& p [[buffer(10)]],
+  uint3 pos              [[thread_position_in_grid]],
+  uint3 tpg_vec          [[threads_per_threadgroup]]
+) {
+  const uint tpg = tpg_vec.x;
+  const uint h = pos.x / tpg;
+  const uint tid = pos.x % tpg;
+  const uint block_row = pos.y;
+  const uint N = p.N, d = p.d;
+  const float scale = p.scale;
+
+  const uint row_start = block_row * Br;
+  const uint row_end = min(row_start + Br, N);
+  const uint num_rows = row_end - row_start;
+  if (num_rows == 0) return;
+
+  device const half* Qh = Q + h * N * d;
+  device const half* Kh = K + h * N * d;
+  device const half* Vh = V + h * N * d;
+  device const half* Oh = O + h * N * d;
+  device const half* dOh = dO + h * N * d;
+  device const float* Lh = L + h * N;
+  device const float* Mh = M_in + h * N;
+  device half* dQh = dQ + h * N * d;
+  device half* dKh = dK + h * N * d;
+  device half* dVh = dV + h * N * d;
+
+  threadgroup float S_block[Br * Bc];
+  threadgroup float D_i[Br];
+  threadgroup float dQ_acc[Br * 128];
+
+  for (uint i = tid; i < num_rows; i += tpg) {
+    float di = 0.0f;
+    for (uint k = 0; k < d; k++) di += float(dOh[(row_start + i) * d + k]) * float(Oh[(row_start + i) * d + k]);
+    D_i[i] = di;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  for (uint idx = tid; idx < num_rows * d; idx += tpg) dQ_acc[idx] = 0.0f;
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  const uint num_col_blocks = (N + Bc - 1) / Bc;
+  for (uint col_block = 0; col_block < num_col_blocks; col_block++) {
+    const uint col_start = col_block * Bc;
+    const uint col_end = min(col_start + Bc, N);
+    const uint num_cols = col_end - col_start;
+    if (p.causal && col_start > row_end - 1) break;
+
+    for (uint idx = tid; idx < num_rows * num_cols; idx += tpg) {
+      uint i = idx / num_cols, j = idx % num_cols;
+      float dot = 0.0f;
+      for (uint k = 0; k < d; k++) dot += float(Qh[(row_start + i) * d + k]) * float(Kh[(col_start + j) * d + k]);
+      dot *= scale;
+      if (p.causal && (col_start + j) > (row_start + i)) dot = -INFINITY;
+      S_block[i * Bc + j] = dot;
+    }
+    for (uint idx = tid; idx < Br * Bc; idx += tpg) { uint i = idx / Bc, j = idx % Bc; if (i >= num_rows || j >= num_cols) S_block[idx] = -INFINITY; }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    for (uint idx = tid; idx < num_rows * num_cols; idx += tpg) {
+      uint i = idx / num_cols, j = idx % num_cols;
+      S_block[i * Bc + j] = exp(S_block[i * Bc + j] - Mh[row_start + i]) / Lh[row_start + i];
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    for (uint idx = tid; idx < num_cols * d; idx += tpg) {
+      uint j = idx / d, k = idx % d;
+      float sum = 0.0f;
+      for (uint i = 0; i < num_rows; i++) sum += S_block[i * Bc + j] * float(dOh[(row_start + i) * d + k]);
+      dVh[(col_start + j) * d + k] = half(float(dVh[(col_start + j) * d + k]) + sum);
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    for (uint idx = tid; idx < num_rows * num_cols; idx += tpg) {
+      uint i = idx / num_cols, j = idx % num_cols;
+      float dp_ij = 0.0f;
+      for (uint k = 0; k < d; k++) dp_ij += float(dOh[(row_start + i) * d + k]) * float(Vh[(col_start + j) * d + k]);
+      S_block[i * Bc + j] = S_block[i * Bc + j] * (dp_ij - D_i[i]) * scale;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    for (uint idx = tid; idx < num_rows * d; idx += tpg) {
+      uint i = idx / d, k = idx % d;
+      float sum = 0.0f;
+      for (uint j = 0; j < num_cols; j++) sum += S_block[i * Bc + j] * float(Kh[(col_start + j) * d + k]);
+      dQ_acc[i * d + k] += sum;
+    }
+
+    for (uint idx = tid; idx < num_cols * d; idx += tpg) {
+      uint j = idx / d, k = idx % d;
+      float sum = 0.0f;
+      for (uint i = 0; i < num_rows; i++) sum += S_block[i * Bc + j] * float(Qh[(row_start + i) * d + k]);
+      dKh[(col_start + j) * d + k] = half(float(dKh[(col_start + j) * d + k]) + sum);
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+
+  for (uint idx = tid; idx < num_rows * d; idx += tpg) {
+    uint i = idx / d, k = idx % d;
+    dQh[(row_start + i) * d + k] = half(float(dQh[(row_start + i) * d + k]) + dQ_acc[idx]);
+  }
+}

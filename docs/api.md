@@ -156,10 +156,68 @@ const model = await loadCheckpoint('path/prefix')
 import { train, encode, decode, save, load } from './src/tokenizer.js'
 ```
 
+## Mixed Precision (f16)
+
+```js
+// Toggle f16 mode — tensor creation defaults to f16
+smith.f16Mode(true)
+smith.defaultDtype()  // 'f16'
+
+// Cast between dtypes
+const h = smith.cast(f32Tensor, 'f16')  // GPU kernel
+const f = smith.cast(f16Tensor, 'f32')
+
+// Dynamic loss scaler for mixed precision training
+const scaler = smith.createLossScaler({
+  initScale: 65536,     // starting scale (default 2^16)
+  growthInterval: 2000, // steps between growth attempts
+  growthFactor: 2,      // multiply scale on growth
+  backoffFactor: 0.5,   // multiply scale on NaN
+  minScale: 1,          // floor
+})
+
+// Training loop:
+const scaledLoss = scaler.scaleUp(loss)
+backward(scaledLoss)
+const ok = scaler.unscale(gradArrays)  // returns false if NaN/Inf
+if (ok) adamwStep(opt)
+scaler.update(ok)
+```
+
+All ops automatically dispatch f16 kernels when given f16 tensors. f16 shaders use f32 accumulators for reductions (matmul inner loop, softmax, layernorm, reduce).
+
 ## Quantization
 
 ```js
 import { quantizeQ4, matmulQ4 } from './src/ops/quantize.js'
 const wq = quantizeQ4(weightTensor)    // f32 → q4
 const out = matmulQ4(activations, wq)  // q4 matmul on GPU
+// Q8 matmul also available: matmulQ8(activations, bQuant)
 ```
+
+## GGUF Import
+
+Load models from GGUF files (llama.cpp, ollama format). Supports Llama, Phi, and GPT-2 architectures with Q4_0, Q4_1, Q8_0, F16, and F32 weight types.
+
+```js
+// Load a GGUF model
+const { model, config, forward, loaded, skipped } = await smith.loadGGUF('model.gguf')
+
+// Run inference
+const { logits } = forward([1, 2, 3, 4]) // token IDs
+
+// Inspect without loading
+const buf = await Bun.file('model.gguf').arrayBuffer()
+const parsed = smith.parseGGUF(buf)
+const tensors = smith.listGGUFTensors(parsed) // [{ name, shape, type, bytes }]
+const config = smith.extractGGUFConfig(parsed.metadata)
+```
+
+| Function | Description |
+|----------|-------------|
+| `loadGGUF(path)` | Load GGUF file → model with forward function |
+| `parseGGUF(buffer)` | Parse GGUF ArrayBuffer → `{ version, metadata, tensors, dataOffset }` |
+| `listGGUFTensors(parsed)` | List tensor names, shapes, types, byte sizes |
+| `extractGGUFConfig(metadata)` | Extract model config (arch, dim, layers, heads, RoPE, etc.) |
+
+Supported architectures: `llama` (Llama 2/3, Mistral, CodeLlama, TinyLlama), `phi`/`phi2`/`phi3`, `gpt2`.

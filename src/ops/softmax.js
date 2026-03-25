@@ -2,7 +2,7 @@
 // GPU softmax along the last dimension.
 
 import * as T from '../tensor.js'
-import { run } from '../dispatch.js'
+import { run, k } from '../dispatch.js'
 
 function softmax(input, axis = -1) {
   const ndim = input.shape.length
@@ -19,7 +19,7 @@ function softmax(input, axis = -1) {
   // Round tpg to next power of 2 for reduction to work
   const tpgPow2 = 1 << Math.ceil(Math.log2(Math.max(tpg, 2)))
 
-  run('softmax_forward', [
+  run(k('softmax_forward', input.dtype), [
     { buffer: input.buffer, index: 0 },
     { buffer: out.buffer, index: 1 },
   ], { x: rows * tpgPow2 }, { x: tpgPow2 },

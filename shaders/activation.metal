@@ -157,3 +157,47 @@ kernel void sqrt_forward(
 {
     output[tid] = sqrt(input[tid]);
 }
+
+// ============================================================
+// f16 variants — half precision I/O, compute in half
+// GELU/SiLU use f32 intermediates for the inner tanh/exp to avoid overflow
+// ============================================================
+
+kernel void relu_forward_f16(device const half* input [[buffer(0)]], device half* output [[buffer(1)]], uint tid [[thread_position_in_grid]]) { output[tid] = max(input[tid], half(0)); }
+kernel void relu_backward_f16(device const half* input [[buffer(0)]], device const half* grad_out [[buffer(1)]], device half* grad_in [[buffer(2)]], uint tid [[thread_position_in_grid]]) { grad_in[tid] = input[tid] > half(0) ? grad_out[tid] : half(0); }
+
+kernel void gelu_forward_f16(device const half* input [[buffer(0)]], device half* output [[buffer(1)]], uint tid [[thread_position_in_grid]]) {
+    float x = float(input[tid]);
+    float x3 = x * x * x;
+    float inner = SQRT_2_PI * (x + GELU_COEFF * x3);
+    output[tid] = half(0.5f * x * (1.0f + tanh(inner)));
+}
+
+kernel void gelu_backward_f16(device const half* input [[buffer(0)]], device const half* grad_out [[buffer(1)]], device half* grad_in [[buffer(2)]], uint tid [[thread_position_in_grid]]) {
+    float x = float(input[tid]);
+    float x2 = x * x; float x3 = x2 * x;
+    float inner = SQRT_2_PI * (x + GELU_COEFF * x3);
+    float t = tanh(inner); float sech2 = 1.0f - t * t;
+    float d_inner = SQRT_2_PI * (1.0f + 3.0f * GELU_COEFF * x2);
+    grad_in[tid] = half(float(grad_out[tid]) * (0.5f * (1.0f + t) + 0.5f * x * sech2 * d_inner));
+}
+
+kernel void silu_forward_f16(device const half* input [[buffer(0)]], device half* output [[buffer(1)]], uint tid [[thread_position_in_grid]]) {
+    float x = float(input[tid]);
+    float s = 1.0f / (1.0f + exp(-x));
+    output[tid] = half(x * s);
+}
+
+kernel void silu_backward_f16(device const half* input [[buffer(0)]], device const half* grad_out [[buffer(1)]], device half* grad_in [[buffer(2)]], uint tid [[thread_position_in_grid]]) {
+    float x = float(input[tid]);
+    float s = 1.0f / (1.0f + exp(-x));
+    grad_in[tid] = half(float(grad_out[tid]) * s * (1.0f + x * (1.0f - s)));
+}
+
+kernel void sigmoid_forward_f16(device const half* input [[buffer(0)]], device half* output [[buffer(1)]], uint tid [[thread_position_in_grid]]) { output[tid] = half(1.0f / (1.0f + exp(-float(input[tid])))); }
+kernel void sigmoid_backward_f16(device const half* output [[buffer(0)]], device const half* grad_out [[buffer(1)]], device half* grad_in [[buffer(2)]], uint tid [[thread_position_in_grid]]) { float s = float(output[tid]); grad_in[tid] = half(float(grad_out[tid]) * s * (1.0f - s)); }
+kernel void tanh_forward_f16(device const half* input [[buffer(0)]], device half* output [[buffer(1)]], uint tid [[thread_position_in_grid]]) { output[tid] = half(tanh(float(input[tid]))); }
+kernel void tanh_backward_f16(device const half* output [[buffer(0)]], device const half* grad_out [[buffer(1)]], device half* grad_in [[buffer(2)]], uint tid [[thread_position_in_grid]]) { float t = float(output[tid]); grad_in[tid] = half(float(grad_out[tid]) * (1.0f - t * t)); }
+kernel void exp_forward_f16(device const half* input [[buffer(0)]], device half* output [[buffer(1)]], uint tid [[thread_position_in_grid]]) { output[tid] = half(exp(float(input[tid]))); }
+kernel void log_forward_f16(device const half* input [[buffer(0)]], device half* output [[buffer(1)]], uint tid [[thread_position_in_grid]]) { output[tid] = half(log(float(input[tid]))); }
+kernel void sqrt_forward_f16(device const half* input [[buffer(0)]], device half* output [[buffer(1)]], uint tid [[thread_position_in_grid]]) { output[tid] = half(sqrt(float(input[tid]))); }

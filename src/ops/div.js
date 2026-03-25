@@ -2,12 +2,12 @@
 // Element-wise division with broadcasting support.
 
 import * as T from '../tensor.js'
-import { run, runElementwise, broadcastParams } from '../dispatch.js'
+import { run, runElementwise, broadcastParams, k } from '../dispatch.js'
 import { computeBroadcastStrides } from './add.js'
 
 function gpuDiv(a, b) {
   const out = T.create(a.shape, a.dtype)
-  runElementwise('elementwise_div', [
+  runElementwise(k('elementwise_div', a.dtype), [
     { buffer: a.buffer, index: 0 },
     { buffer: b.buffer, index: 1 },
     { buffer: out.buffer, index: 2 },
@@ -22,7 +22,7 @@ function gpuBroadcastDiv(a, b) {
   const aStrides = computeBroadcastStrides(a.shape, outShape)
   const bStrides = computeBroadcastStrides(b.shape, outShape)
   const params = broadcastParams(outShape, aStrides, bStrides, outSize)
-  run('broadcast_div', [
+  run(k('broadcast_div', a.dtype), [
     { buffer: a.buffer, index: 0 },
     { buffer: b.buffer, index: 1 },
     { buffer: out.buffer, index: 2 },

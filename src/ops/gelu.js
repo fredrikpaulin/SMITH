@@ -3,11 +3,11 @@
 // Backward formula ported from TinyFormer.
 
 import * as T from '../tensor.js'
-import { runElementwise } from '../dispatch.js'
+import { runElementwise, k } from '../dispatch.js'
 
 function gelu(input) {
   const out = T.create(input.shape, input.dtype)
-  runElementwise('gelu_forward', [
+  runElementwise(k('gelu_forward', input.dtype), [
     { buffer: input.buffer, index: 0 },
     { buffer: out.buffer, index: 1 },
   ], input.size)
@@ -16,7 +16,7 @@ function gelu(input) {
 
 function geluBackward(input, gradOutput) {
   const gradInput = T.create(input.shape, input.dtype)
-  runElementwise('gelu_backward', [
+  runElementwise(k('gelu_backward', input.dtype), [
     { buffer: input.buffer, index: 0 },
     { buffer: gradOutput.buffer, index: 1 },
     { buffer: gradInput.buffer, index: 2 },
