@@ -1,0 +1,10 @@
+node_modules/
+native/libsmith.dylib
+shaders/smith.metallib
+shaders/*.air
+*.bin
+*.checkpoint
+.DS_Store
+pr/
+CLAUDE.md
+ARCHITECTURE.md
