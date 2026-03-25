@@ -1,19 +1,24 @@
 # Smith
 
-GPU-accelerated tensors, autograd, and transformer training for Bun on Apple Silicon.
+GPU-accelerated tensors, autograd, and ML inference/training for Bun on Apple Silicon.
 
 Smith gives JavaScript direct access to Metal compute shaders through a thin C bridge and Bun's FFI. Unified memory means zero-copy between CPU and GPU — a `Float32Array` in JS and a `device float*` in a Metal shader point to the same physical bytes.
 
 ## What it does
 
-- **GPU tensors** backed by Metal shared buffers, accessed as typed arrays
-- **Reverse-mode autograd** (DAG-based, ported from [TinyFormer](https://github.com/user/tinyformer))
-- **Fused Metal shaders** for matmul (tiled GEMM), softmax, layernorm, AdamW, and more
-- **GPT-2 style transformer** with multi-head attention, pre-norm blocks, and weight-tied output head
-- **BPE tokenizer**, checkpoint save/load, text generation with temperature/top-k/top-p
-- **4-bit quantization** for inference (`quantizeQ4` + `matmulQ4`)
+- **GPU tensors** backed by Metal shared buffers, accessed as typed arrays (f32, f16)
+- **Reverse-mode autograd** (DAG-based, topological sort backward)
+- **Fused Metal shaders** for matmul (tiled GEMM), softmax, layernorm, flash attention, AdamW, and more
+- **GPT-2 transformer** with multi-head attention, pre-norm blocks, weight tying, and KV cache
+- **Convolutions** — direct conv2d, Winograd F(2x2,3x3), im2col+GEMM, pooling, batch normalization
+- **Vision models** — ResNet-18/34/50/101/152, CLIP ViT-B/32, ViT-B/16, ViT-L/14
+- **Model loading** — GGUF (llama.cpp format: Llama, Phi, GPT-2) and safetensors (torchvision, OpenAI CLIP)
+- **Quantization** — Q4 and Q8 matmul for inference, 4-bit weight quantization
+- **Mixed precision** — f16 mode with loss scaling
+- **Profiling** — per-kernel GPU timing, memory tracking, benchmarking
+- **BPE tokenizer**, checkpoint save/load, text generation with temperature/top-k/top-p/repetition penalty
 
-Zero dependencies. No npm packages. Just Bun, Metal, and ~2500 lines of JavaScript + ~500 lines of Metal shaders.
+Zero dependencies. No npm packages. Just Bun, Metal, and JavaScript + Metal shaders.
 
 ## Requirements
 
@@ -74,30 +79,67 @@ for (let step = 0; step < 100; step++) {
 }
 ```
 
-### Generate text
+### Load a GGUF model
 
 ```js
-import { generate } from './src/generate.js'
-
-const output = generate(model, promptIds, {
-  maxTokens: 100, temperature: 0.8, topK: 40,
+const llama = await smith.loadGGUF('tinyllama.gguf')
+const output = llama.generate([1, 2, 3], {
+  maxTokens: 50, temperature: 0.8, topK: 40,
 })
 ```
 
-### Checkpoints
+### Load a ResNet
 
 ```js
-import { saveCheckpoint, loadCheckpoint } from './src/checkpoint.js'
-
-await saveCheckpoint(model, './my-model')
-const loaded = await loadCheckpoint('./my-model')
+const { forward } = await smith.loadResNet('resnet50.safetensors', {
+  variant: 'resnet50',
+})
+const input = smith.preprocessResNet(rgbaPixels, width, height)
+const logits = forward(smith.variable(input, { requiresGrad: false }), false)
 ```
 
-### Quantize weights for faster inference
+### Load CLIP
 
 ```js
-const wq = smith.quantizeQ4(weightTensor)  // f32 → 4-bit
-const out = smith.matmulQ4(activations, wq) // dequant-fused matmul on GPU
+const clip = await smith.loadCLIP('clip-vit-b-32.safetensors', {
+  variant: 'ViT-B/32',
+})
+const imgEmbed = clip.encodeImage(imageInput)
+const txtEmbed = clip.encodeText(tokenIds)
+const similarity = clip.similarity(imgEmbed, txtEmbed)
+```
+
+### Convolutions
+
+```js
+const input = smith.variable(smith.rand([1, 3, 32, 32]), { requiresGrad: true })
+const weight = smith.variable(smith.rand([16, 3, 3, 3]), { requiresGrad: true })
+const out = smith.conv2d(input, weight, null, { padding: 1 })
+// Auto-dispatches: Winograd (3x3 stride 1) > im2col (larger) > direct
+```
+
+### Profile GPU work
+
+```js
+const p = smith.profile(() => {
+  smith.noGrad(() => smith.matmul(a, b))
+})
+console.log(p.gpuMs, p.kernels)
+
+const b = smith.benchmark('matmul-256', () => {
+  smith.noGrad(() => smith.matmul(a, b))
+}, { warmup: 3, iterations: 10 })
+console.log(b.gpu.median, b.gpu.p95)
+```
+
+### Checkpoints and quantization
+
+```js
+await smith.saveCheckpoint(model, './my-model')
+const loaded = await smith.loadCheckpoint('./my-model')
+
+const wq = smith.quantizeQ4(weightTensor)
+const out = smith.matmulQ4(activations, wq)
 ```
 
 ## Architecture
@@ -109,59 +151,90 @@ src/autograd.js    ──►    native/gpu_bridge.m  ──►   shaders/*.metal
 src/ops/*.js              (bun:ffi dlopen)           (smith.metallib)
 src/nn.js
 src/model.js
+src/resnet.js
+src/clip.js
+src/profile.js
 ```
 
-Seven layers, bottom to top: Metal shaders → Objective-C bridge → FFI bindings → buffer pool → tensor module → ops + autograd → model/nn/training.
-
-All intelligence lives in JavaScript. The native layer is a dumb pipe: allocate buffer, load shader, dispatch compute, wait.
+All intelligence lives in JavaScript. The native layer is a dumb pipe: allocate buffer, load shader, dispatch compute, wait, return timing.
 
 ## Project structure
 
 ```
 smith/
-├── native/          Objective-C Metal bridge
+├── native/          Objective-C Metal bridge (~250 lines)
 │   ├── gpu_bridge.h
 │   └── gpu_bridge.m
 ├── shaders/         Metal compute shaders
-│   ├── elementwise.metal
-│   ├── matmul.metal       (tiled GEMM, simple, batched)
-│   ├── matmul_q4.metal    (4-bit quantized)
-│   ├── activation.metal   (relu, gelu, silu, sigmoid, tanh)
-│   ├── reduce.metal       (sum, max — full and per-axis)
-│   ├── softmax.metal      (fused, numerically stable)
-│   ├── layernorm.metal    (forward + backward)
-│   └── adam.metal         (fused AdamW step)
+│   ├── matmul.metal          Tiled GEMM, simple, batched
+│   ├── matmul_q4.metal       4-bit quantized matmul
+│   ├── matmul_q8.metal       8-bit quantized matmul
+│   ├── flash_attention.metal Fused scaled dot-product attention
+│   ├── conv2d.metal          Direct 2D convolution + backward
+│   ├── conv2d_winograd.metal Winograd F(2x2,3x3) forward + backward
+│   ├── im2col.metal          im2col/col2im for GEMM-based conv
+│   ├── pool2d.metal          Max/avg pooling
+│   ├── batchnorm.metal       Batch normalization
+│   ├── rope.metal            Rotary position embeddings
+│   ├── rmsnorm.metal         RMS normalization
+│   ├── swiglu.metal          Fused SiLU gate
+│   ├── softmax.metal         Fused, numerically stable
+│   ├── layernorm.metal       Forward + backward
+│   ├── activation.metal      relu, gelu, silu, sigmoid, tanh
+│   ├── adam.metal             Fused AdamW step
+│   ├── elementwise.metal     add, sub, mul, div + broadcasting
+│   └── reduce.metal          sum, max — full and per-axis
 ├── src/
-│   ├── device.js          FFI bindings to libsmith.dylib
-│   ├── tensor.js          GPU-backed tensors + shape utilities
-│   ├── pool.js            Power-of-2 buffer recycling
-│   ├── dtype.js           f16 encode/decode
-│   ├── dispatch.js        Shader dispatch helper
-│   ├── autograd.js        DAG-based reverse-mode AD
-│   ├── optim.js           AdamW + cosine schedule + grad clipping
-│   ├── nn.js              Linear, MHA, transformer blocks
-│   ├── model.js           GPT assembly + weight tying
-│   ├── generate.js        Text generation + sampling
-│   ├── checkpoint.js      Save/load model weights
-│   ├── tokenizer.js       BPE tokenizer
-│   ├── index.js           Public API
-│   └── ops/               Per-op GPU dispatch wrappers
-├── tests/           58 tests across 8 files
-├── bench/           Benchmark suite
-├── docs/            API reference + quick start
-└── build.sh         One-command build
+│   ├── device.js       FFI bindings to libsmith.dylib
+│   ├── tensor.js       GPU-backed tensors + shape utilities
+│   ├── pool.js         Power-of-2 buffer recycling
+│   ├── dispatch.js     Shader dispatch (instrumented for profiling)
+│   ├── autograd.js     DAG-based reverse-mode AD
+│   ├── optim.js        AdamW + cosine schedule + grad clipping
+│   ├── nn.js           Linear, MHA, transformer blocks
+│   ├── model.js        GPT assembly + weight tying
+│   ├── resnet.js       ResNet-18/34/50/101/152 builder + loader
+│   ├── clip.js         CLIP ViT + text encoder + loader
+│   ├── vision.js       Image preprocessing (resize, crop, normalize)
+│   ├── gguf.js         GGUF binary parser + dequantization
+│   ├── gguf_loader.js  Llama/Phi/GPT-2 model loading from GGUF
+│   ├── gguf_cache.js   KV cache + cached generation
+│   ├── safetensors.js  Safetensors parser + GPT-2 weight loader
+│   ├── generate.js     Text generation + sampling
+│   ├── profile.js      Per-kernel GPU profiling + benchmarking
+│   ├── checkpoint.js   Save/load model weights
+│   ├── tokenizer.js    BPE tokenizer
+│   ├── dtype.js        f16 encode/decode
+│   ├── f16mode.js      Mixed precision mode
+│   ├── index.js        Public API
+│   └── ops/            Per-op GPU dispatch wrappers
+├── tests/              Tests across all phases
+├── bench/              Benchmark suite
+├── docs/               API reference
+├── pr/                 Dev notes for blog
+└── build.sh            One-command build
 ```
 
 ## Metal shaders
 
 | Shader | What it does |
 |--------|-------------|
-| `matmul_f32` | Tiled GEMM: 32×32 tiles, threadgroup shared memory, 4×4 per-thread sub-tiles |
-| `matmul_q4` | 4-bit dequant-fused matmul with per-group (32 element) scale/zero |
-| `softmax_forward` | Fused max → exp → normalize per row via shared memory reductions |
-| `layernorm_forward/backward` | Fused mean → variance → normalize → scale+shift, with saved xhat |
-| `adamw_step` | Fused moment update + bias correction + weight decay in one dispatch |
-| `elementwise_*` | add, sub, mul, div, scale, neg, fill — with broadcasting variants |
+| `matmul_f32` | Tiled GEMM: 32x32 tiles, shared memory, 4x4 per-thread sub-tiles |
+| `matmul_q4` | 4-bit dequant-fused matmul with per-group scale/zero |
+| `matmul_q8` | 8-bit quantized matmul with f16 per-block scale |
+| `flash_attention` | Fused scaled dot-product attention (causal + non-causal) |
+| `conv2d_forward/backward` | Direct 2D convolution with groups, dilation, stride |
+| `conv2d_winograd` | Winograd F(2x2,3x3): 2.25x fewer multiplications for 3x3 kernels |
+| `im2col/col2im` | Rearrange patches for GEMM-based convolution on larger kernels |
+| `pool2d` | Max pooling (with argmax) and average pooling |
+| `batchnorm` | Training + inference mode batch normalization |
+| `rope` | Rotary position embeddings (forward + backward) |
+| `rmsnorm` | Llama-style RMS normalization |
+| `swiglu` | Fused SiLU(gate) * up |
+| `softmax_forward` | Fused max-exp-normalize per row via shared memory reductions |
+| `layernorm` | Fused mean-variance-normalize-scale+shift, with saved xhat |
+| `adamw_step` | Fused moment update + bias correction + weight decay |
+| `elementwise_*` | add, sub, mul, div, scale, neg, fill — with broadcasting |
 | `activation_*` | relu, gelu, silu, sigmoid, tanh — forward and backward |
 | `reduce_sum/max` | Full parallel reduction and per-axis variants |
 
@@ -169,27 +242,21 @@ smith/
 
 **Unified memory, zero copy.** Apple Silicon shares memory between CPU and GPU. Smith allocates Metal buffers in shared mode and wraps them as typed arrays via `toArrayBuffer()`. Both JS and shaders read/write the same bytes. No staging buffers, no upload queues.
 
-**DAG autograd.** Each variable carries `_deps` and `_backward`. Topological sort on `backward()` handles weight tying, residual connections, and any DAG structure. Ported from TinyFormer's battle-tested autograd.
+**DAG autograd.** Each variable carries `_deps` and `_backward`. Topological sort on `backward()` handles weight tying, residual connections, and any DAG structure.
 
-**Thin C bridge.** The native layer is ~200 lines of Objective-C exposing ~20 flat C functions. No ObjC types cross the FFI boundary — just opaque pointers. JS never touches `MTLBuffer` directly.
+**Thin C bridge.** The native layer is ~250 lines of Objective-C exposing ~20 flat C functions. No ObjC types cross the FFI boundary — just opaque pointers and timing structs.
 
-**Fused shaders where it matters.** Softmax, layernorm, and AdamW are fused into single-dispatch kernels. Five-kernel-launch softmax has ~25μs of FFI overhead; the fused version has ~5μs.
+**3-way convolution dispatch.** `conv2d()` auto-selects: Winograd for 3x3 stride-1 (2.25x fewer multiplies), im2col+GEMM for larger kernels (reuses existing tiled matmul), direct for 1x1 pointwise. No user code changes needed.
 
-## Benchmarks
+**Two-phase GGUF generation.** Prefill processes the full prompt via flash attention, then decode generates tokens one-by-one with cached K/V. The KV cache uses pre-allocated fixed-size buffers with no GC pressure.
 
-```sh
-bun bench/bench.js
-```
-
-Measures matmul, softmax, layernorm, elementwise ops, Q4 matmul, and GPT forward pass with median/mean/min timing.
+**Zero-overhead profiling.** When disabled, profiling adds a single boolean check per dispatch. When enabled, every kernel dispatch records GPU start/end time from Metal command buffers.
 
 ## Tests
 
 ```sh
 bun test tests/
 ```
-
-58 tests covering tensor creation, matmul correctness, autograd gradients, buffer pooling, f16 roundtrip, optimizer convergence, softmax/layernorm/cross-entropy, tokenizer, generation, checkpoint roundtrip, and Q4 quantization accuracy.
 
 ## Lineage
 

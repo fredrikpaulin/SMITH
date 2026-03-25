@@ -1,7 +1,7 @@
 {
   "name": "smith",
-  "version": "0.7.0",
-  "description": "Metal GPU compute for Bun — tensors, autograd, and ML on Apple Silicon",
+  "version": "0.16.0",
+  "description": "Metal GPU compute for Bun — tensors, autograd, transformers, convnets, GGUF/safetensors model loading, and vision (ResNet, CLIP) on Apple Silicon",
   "type": "module",
   "main": "src/index.js",
   "author": "Fredrik Paulin <fredrik@rymdskepp.com>",
@@ -10,7 +10,7 @@
     "test": "bun test tests/",
     "bench": "bun bench/bench.js"
   },
-  "keywords": ["gpu", "metal", "apple-silicon", "tensor", "autograd", "ml", "bun"],
+  "keywords": ["gpu", "metal", "apple-silicon", "tensor", "autograd", "ml", "bun", "gguf", "clip", "resnet", "convnet", "profiling"],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/fredrikpaulin/smith.git"
