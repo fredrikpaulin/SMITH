@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.13.0 — Phase 13: Winograd Convolution (2026-03-25)
+
+### Added
+
+- **Winograd F(2×2, 3×3) Metal shader** (`shaders/conv2d_winograd.metal`) — Computes 2×2 output tiles from 4×4 input tiles using 16 multiplications instead of 36 (2.25× reduction). Forward kernels with and without bias. Backward kernel for input gradient using atomic scatter-add for overlapping tiles.
+- **JS dispatch** (`src/ops/conv2d_winograd.js`) — `transformFilter3x3` pre-transforms a single 3×3 filter via G×g×G^T (CPU, once). `transformWeights` batch-transforms all filters. `canUseWinograd` checks eligibility (3×3, stride 1, dilation 1, groups 1). `winogradForward` and `winogradBackwardInput` dispatch to GPU.
+- **Auto-dispatch** — `conv2d()` in autograd automatically selects Winograd for eligible 3×3 convolutions, direct conv for everything else. Weight gradient always uses direct conv (Winograd weight gradient too complex for marginal benefit).
+- **Tests** (`tests/winograd.test.js`) — Filter transform properties, `canUseWinograd` selection logic, numerical equivalence vs direct conv (no padding, padding=1, batched, no bias, odd dims, CPU reference), auto-dispatch verification, backward gradient finiteness, numerical gradient checks (input and weight), autograd pipeline (conv→relu→conv→sum).
+
 ## 0.12.0 — Phase 12: KV Cache for GGUF Models (2026-03-25)
 
 ### Added

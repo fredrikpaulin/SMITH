@@ -260,6 +260,13 @@ smith.backward(loss)
 
 Conv2d options: `{ stride, padding, dilation, groups }` — each accepts scalar or `[H, W]` array.
 
+**Winograd auto-dispatch:** `conv2d()` automatically uses Winograd F(2×2, 3×3) for 3×3 kernels with stride 1, dilation 1, groups 1. This reduces arithmetic from 36 to 16 multiplications per 2×2 output tile. No code changes needed — the dispatch is transparent. For manual control:
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `canUseWinograd` | `(weight, opts)` | Check if Winograd is applicable |
+| `winogradTransformWeights` | `(weight)` | Pre-transform `[outC, inC, 3, 3]` → `[outC, inC, 4, 4]` |
+
 Pool options: `{ kernelSize, stride, padding }` — each accepts scalar or `[H, W]` array. Stride defaults to kernelSize.
 
 BatchNorm options: `{ eps, momentum }` — defaults: `1e-5`, `0.1`.
