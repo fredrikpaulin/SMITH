@@ -16,6 +16,7 @@ import { softmax as gpuSoftmax } from './ops/softmax.js'
 import { layernormForward as gpuLayernormFwd, layernormBackward as gpuLayernormBwd } from './ops/layernorm.js'
 import { transpose as gpuTranspose, inverseAxes } from './ops/transpose.js'
 import { reshape as gpuReshape } from './ops/reshape.js'
+import { flashAttentionForward as gpuFlashFwd, flashAttentionBackward as gpuFlashBwd } from './ops/flash_attention.js'
 
 let _noGrad = false
 
@@ -88,6 +89,8 @@ function addGrad(v, g) {
       grad = gpuReshape(gpuSum(grad, i), v.data.shape)
     }
   }
+  // Ensure contiguous layout — transposed views have physical data in wrong order
+  grad = T.contiguous(grad)
   v.grad = v.grad ? gpuAdd(v.grad, grad) : grad
 }
 
@@ -293,6 +296,25 @@ function layernorm(a, gamma, beta, eps = 1e-5) {
   })
 }
 
+// --- Flash Attention ---
+// Fused attention: Q, K, V → O in O(n) memory using tiled online softmax.
+// Saves log-sum-exp stats (L, M) for the backward pass instead of the full attention matrix.
+
+function flashAttention(q, k, v, causal = true) {
+  const { O, L, M } = gpuFlashFwd(q.data, k.data, v.data, causal)
+  return variable(O, {
+    _deps: [q, k, v],
+    _backward: _noGrad ? null : (grad) => {
+      const { dQ, dK, dV } = gpuFlashBwd(
+        q.data, k.data, v.data, O, grad, L, M, causal
+      )
+      addGrad(q, dQ)
+      addGrad(k, dK)
+      addGrad(v, dV)
+    },
+  })
+}
+
 // --- Cross-entropy loss ---
 
 function crossEntropy(logits, targets) {
@@ -343,6 +365,7 @@ export {
   add, sub, mul, matmul, scale, neg,
   relu, gelu,
   softmax, layernorm, crossEntropy,
+  flashAttention,
   sum, reshape,
   transposeVar as transpose,
   embedding,

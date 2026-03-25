@@ -4,7 +4,7 @@
 // Temperature, top-k, top-p (nucleus), repetition penalty.
 
 import * as A from './autograd.js'
-import { forward } from './model.js'
+import { forward, forwardCached } from './model.js'
 
 // --- Sampling strategies (all pure JS, no GPU needed) ---
 
@@ -145,8 +145,82 @@ function topKPredictions(model, tokenIds, k = 10) {
     .slice(0, k)
 }
 
+// --- Generation with KV cache (O(1) per token after prompt) ---
+
+function generateCached(model, promptIds, config = {}, callbacks = {}) {
+  const {
+    maxTokens = 50,
+    temperature = 1.0,
+    topK = 0,
+    topP = 1.0,
+    repetitionPenalty = 1.0,
+  } = config
+
+  const maxSeqLen = model.config.maxSeqLen
+  const vocabSize = model.config.vocabSize
+  const generated = [...promptIds]
+  let kvCaches = null
+
+  // Phase 1: Process prompt tokens one by one to fill the cache
+  const promptToProcess = generated.length > maxSeqLen
+    ? generated.slice(-maxSeqLen)
+    : [...generated]
+  const promptLen = promptToProcess.length
+
+  for (let i = 0; i < promptLen; i++) {
+    A.noGrad(() => {
+      const result = forwardCached(model, promptToProcess[i], i, kvCaches)
+      kvCaches = result.newCaches
+      // Only sample from the last prompt token
+      if (i === promptLen - 1) {
+        let lastLogits = Array.from(result.logits.data.data.slice(0, vocabSize))
+        lastLogits = applyRepetitionPenalty(lastLogits, generated, repetitionPenalty)
+        lastLogits = applyTemperature(lastLogits, temperature)
+        lastLogits = applyTopK(lastLogits, topK)
+        lastLogits = applyTopP(lastLogits, topP)
+        const nextToken = temperature === 0 ? argmax(lastLogits) : sampleFromLogits(lastLogits)
+        generated.push(nextToken)
+      }
+    })
+  }
+
+  if (callbacks.onToken) {
+    const shouldStop = callbacks.onToken(generated[generated.length - 1], 1)
+    if (shouldStop) return generated
+  }
+
+  // Phase 2: Generate remaining tokens one at a time using cache
+  for (let i = 1; i < maxTokens; i++) {
+    const position = promptLen + i - 1
+    if (position >= maxSeqLen) break
+
+    const lastToken = generated[generated.length - 1]
+    let nextToken
+
+    A.noGrad(() => {
+      const result = forwardCached(model, lastToken, position, kvCaches)
+      kvCaches = result.newCaches
+      let lastLogits = Array.from(result.logits.data.data.slice(0, vocabSize))
+      lastLogits = applyRepetitionPenalty(lastLogits, generated, repetitionPenalty)
+      lastLogits = applyTemperature(lastLogits, temperature)
+      lastLogits = applyTopK(lastLogits, topK)
+      lastLogits = applyTopP(lastLogits, topP)
+      nextToken = temperature === 0 ? argmax(lastLogits) : sampleFromLogits(lastLogits)
+    })
+
+    generated.push(nextToken)
+
+    if (callbacks.onToken) {
+      const shouldStop = callbacks.onToken(nextToken, i + 1)
+      if (shouldStop) break
+    }
+  }
+
+  return generated
+}
+
 export {
-  generate, topKPredictions,
+  generate, generateCached, topKPredictions,
   applyTemperature, applyTopK, applyTopP, applyRepetitionPenalty,
   sampleFromLogits, argmax,
 }

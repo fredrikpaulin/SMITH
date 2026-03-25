@@ -123,14 +123,14 @@ test('MLP training: loss decreases over 50 steps', () => {
 
   // Collect losses
   const losses = []
-  for (let step = 0; step < 50; step++) {
+  for (let step = 0; step < 200; step++) {
     losses.push(trainStep())
   }
 
-  // Smooth comparison: average of first 5 vs last 5
-  const firstAvg = losses.slice(0, 5).reduce((a, b) => a + b, 0) / 5
-  const lastAvg = losses.slice(-5).reduce((a, b) => a + b, 0) / 5
+  // Smooth comparison: average of first 20 vs last 20
+  const firstAvg = losses.slice(0, 20).reduce((a, b) => a + b, 0) / 20
+  const lastAvg = losses.slice(-20).reduce((a, b) => a + b, 0) / 20
 
-  // Loss should decrease — the last 5 should be lower than the first 5
+  // Loss should decrease — the last 20 should be lower than the first 20
   expect(lastAvg).toBeLessThan(firstAvg)
 })

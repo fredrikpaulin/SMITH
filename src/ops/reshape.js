@@ -18,14 +18,19 @@ function reshape(input, newShape) {
     throw new Error(`Cannot reshape [${input.shape}] to [${newShape}]`)
   }
 
+  // Reshape assumes contiguous data layout. If the input is a non-contiguous
+  // view (e.g., from transpose), we must copy to contiguous memory first.
+  // Without this, the new strides won't match the actual data layout.
+  const src = T.isContiguous(input) ? input : T.contiguous(input)
+
   return {
-    buffer: input.buffer,
-    data: input.data,
+    buffer: src.buffer,
+    data: src.data,
     shape: newShape.slice(),
     strides: T.computeStrides(newShape),
-    dtype: input.dtype,
-    size: input.size,
-    offset: input.offset || 0,
+    dtype: src.dtype,
+    size: src.size,
+    offset: src.offset || 0,
   }
 }
 

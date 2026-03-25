@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.7.0 — Phase 7: Flash Attention (2026-03-25)
+
+### Added
+
+- **Flash attention Metal shader** (`shaders/flash_attention.metal`) — Forward and backward kernels implementing FlashAttention-2. Tiled attention with online softmax (running max + sum), never materializes the full [seqLen, seqLen] score matrix. Causal masking applied per-tile with early-exit. Backward recomputes attention weights from saved log-sum-exp stats. Tile sizes Br=Bc=32 for Apple Silicon.
+- **Flash attention dispatch** (`src/ops/flash_attention.js`) — `flashAttentionForward` and `flashAttentionBackward` with multi-buffer dispatch.
+- **Autograd** — `flashAttention(q, k, v, causal?)` with full backward support.
+- **Neural network** — `multiHeadAttentionFlash`, `transformerBlockFlash` replacing decomposed attention with single fused op.
+- **Model** — `forwardFlash` for full model forward pass using flash attention.
+- **Tests** (`tests/flash_attention.test.js`) — numerical equivalence, gradient correctness, CPU reference backward, causal masking, model-level equivalence.
+
+### Fixed
+
+- **Flash backward missing threadgroup_barrier** — Added barrier between dV computation (reads P from S_block) and dS computation (overwrites S_block). Without it, threads could corrupt P values still being read.
+- **`T.zeros()` not zeroing recycled pool buffers** — The buffer pool returns stale buffers from previous operations. `zeros()` now calls `data.fill(0)` instead of relying on Metal allocation zeroing.
+- **`addGrad` storing non-contiguous gradient views** — `gpuTranspose` returns a view with different physical layout. `addGrad` now calls `T.contiguous(grad)` before storing, ensuring `.data` always matches the logical shape. This was the root cause of dK gradient failures: physically-transposed data appeared sign-flipped when compared element-by-element.
+
+## 0.6.0 — Phase 6: Safetensors / Weight Loading (2026-03-25)
+
+### Added
+
+- **Safetensors parser** (`src/safetensors.js`) — `parseSafetensors` reads the binary format (8-byte LE u64 header length + JSON header + raw tensor data). `readTensor` extracts a named tensor as a typed array. `listTensors` enumerates all tensor metadata. No dependencies — parsed with `DataView` and `TextDecoder`.
+- **GPT-2 weight loader** (`src/safetensors.js`) — `loadGPT2Safetensors` loads a GPT-2 safetensors file, infers model config (vocabSize, dim, maxSeqLen, numLayers, numHeads) from tensor shapes, creates a Smith model, and copies weights into GPU tensors via unified memory. `mapGPT2Weights` splits the fused `c_attn` projection `[dim, 3*dim]` into separate Q/K/V `[dim, dim]` weights. Handles f16→f32 conversion. `lm_head.weight` is skipped (weight-tied with `wte` in GPT-2).
+- **Safetensors export** (`src/safetensors.js`) — `exportSafetensors` serializes a Smith model to safetensors format, re-fusing Q/K/V projections back into `c_attn`. `saveSafetensors` writes the buffer to disk.
+- **Tests** (`tests/safetensors.test.js`) — parsing (single/multiple tensors, metadata skip, oversized header rejection), tensor reading (correct offsets, missing tensor error, empty tensor), round-trip (build→parse→read data integrity), GPT-2 weight mapping (c_attn split into Q/K/V with correct values), export (tensor names/shapes, Q/K/V fusion, full export→load weight preservation).
+
+## 0.5.0 — Phase 5: KV Cache (2026-03-25)
+
+### Added
+
+- **Cached multi-head attention** (`src/nn.js`) — `multiHeadAttentionCached` processes a single token and appends K/V to a running cache. `catAlongAxis1` concatenates cached tensors along the sequence dimension. No causal mask needed — Q has length 1, all cached positions are valid.
+- **Cached transformer block** (`src/nn.js`) — `transformerBlockCached` wraps cached attention with pre-norm layernorm, FFN, and residual connections.
+- **Cached forward pass** (`src/model.js`) — `forwardCached(model, tokenId, position, kvCaches)` embeds a single token at an absolute position, runs through all cached blocks, returns logits and updated caches.
+- **Cached generation** (`src/generate.js`) — `generateCached(model, promptIds, config)` processes the prompt token-by-token to fill the cache (prefill), then generates one token at a time using the cache (decode). O(1) compute per new token instead of O(n).
+- **Tests** (`tests/kvcache.test.js`) — cached attention shape/growth, cached forward logits shape, cache growth over positions, cached generation (token output, determinism), equivalence between cached and non-cached output at temperature=0, onToken early stopping.
+
+### Fixed
+
+- **Reshape on non-contiguous tensors** (`src/ops/reshape.js`) — reshape was purely virtual (just swapped shape/strides) without checking contiguity. When a transpose view was reshaped, the new strides didn't match the actual data layout. This caused `multiHeadAttention` to incorrectly interleave head outputs when seqLen > 1 (`A.reshape(A.transpose(attnOut, [1,0,2]), [seqLen, dim])` produced garbage for seqLen > 1). Fix: reshape now enforces contiguity via `T.contiguous()` when the input has non-standard strides. This is the same class of bug as the matmul transpose fix from Phase 2.
+
 ## 0.4.0 — Phase 4: Inference + Polish (2026-03-25)
 
 ### Added

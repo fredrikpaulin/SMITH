@@ -79,8 +79,10 @@ function tensor(values, shape, dtype = 'f32') {
 }
 
 function zeros(shape, dtype = 'f32') {
-  return create(shape, dtype)
-  // data is already zeroed by Metal buffer allocation
+  const t = create(shape, dtype)
+  // Must explicitly zero — pool may return recycled buffers with stale data
+  if (t.data) t.data.fill(0)
+  return t
 }
 
 function ones(shape, dtype = 'f32') {

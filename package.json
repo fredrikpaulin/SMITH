@@ -1,6 +1,6 @@
 {
   "name": "smith",
-  "version": "0.4.0",
+  "version": "0.7.0",
   "description": "Metal GPU compute for Bun — tensors, autograd, and ML on Apple Silicon",
   "type": "module",
   "main": "src/index.js",

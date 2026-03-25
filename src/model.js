@@ -5,7 +5,7 @@
 import * as T from './tensor.js'
 import * as A from './autograd.js'
 import {
-  createTransformerBlock, transformerBlock, blockParams, countParams,
+  createTransformerBlock, transformerBlock, transformerBlockFlash, transformerBlockCached, blockParams, countParams,
   createCausalMask,
 } from './nn.js'
 
@@ -111,7 +111,51 @@ function modelInfo(model) {
   return { vocabSize, numLayers, numHeads, dim, maxSeqLen, totalParams: total, paramCount: params.length }
 }
 
+// --- Flash forward pass (O(n) memory attention) ---
+
+function forwardFlash(model, tokenIds) {
+  let x = embed(tokenIds, model.embedding)
+
+  for (const block of model.blocks) {
+    const result = transformerBlockFlash(x, block)
+    x = result.output
+  }
+
+  x = A.layernorm(x, model.lnFGamma, model.lnFBeta)
+  const logits = A.matmul(x, A.transpose(model.embedding.tokenWeight))
+
+  return { logits }
+}
+
+// --- Cached forward pass (single token, for generation with KV cache) ---
+
+function forwardCached(model, tokenId, position, kvCaches) {
+  // tokenId: single int, position: int (absolute position in sequence)
+  // kvCaches: array of { k, v } per block, or null
+  // Returns { logits: Variable [1, vocabSize], newCaches }
+
+  // Embed single token at the given position
+  const tokEmb = A.embedding([tokenId], model.embedding.tokenWeight) // [1, dim]
+  const posEmb = A.embedding([position], model.embedding.posWeight)  // [1, dim]
+  let x = A.add(tokEmb, posEmb) // [1, dim]
+
+  // Run through blocks with cache
+  const newCaches = []
+  for (let i = 0; i < model.blocks.length; i++) {
+    const cache = kvCaches ? kvCaches[i] : null
+    const result = transformerBlockCached(x, model.blocks[i], cache)
+    x = result.output
+    newCaches.push(result.newCache)
+  }
+
+  // Final layer norm + weight-tied logits
+  x = A.layernorm(x, model.lnFGamma, model.lnFBeta)
+  const logits = A.matmul(x, A.transpose(model.embedding.tokenWeight))
+
+  return { logits, newCaches }
+}
+
 export {
-  CONFIGS, createModel, forward, modelParams, modelInfo,
+  CONFIGS, createModel, forward, forwardFlash, forwardCached, modelParams, modelInfo,
   createEmbedding, embed, embeddingParams,
 }

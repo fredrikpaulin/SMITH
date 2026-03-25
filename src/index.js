@@ -7,12 +7,19 @@ import * as autograd from './autograd.js'
 import * as optim from './optim.js'
 import * as nn from './nn.js'
 import * as model from './model.js'
+import { forwardCached, forwardFlash } from './model.js'
 import * as tokenizer from './tokenizer.js'
 import * as gen from './generate.js'
 import * as ckpt from './checkpoint.js'
 import { quantizeQ4, matmulQ4 } from './ops/quantize.js'
 import { poolStats, poolDrain } from './pool.js'
 import { dtypeBytes, toFloat16, fromFloat16, float32ToFloat16, float16ToFloat32 } from './dtype.js'
+import {
+  parseSafetensors, readTensor, listTensors,
+  loadSafetensors, loadGPT2Safetensors,
+  exportSafetensors, saveSafetensors,
+  mapGPT2Weights,
+} from './safetensors.js'
 
 // Re-export tensor creation
 const { tensor, zeros, ones, full, rand, randn, scalar, toArray, toString: tensorToString } = T
@@ -22,6 +29,7 @@ const {
   variable, param, backward, zeroGrad, noGrad,
   add, sub, mul, matmul, scale, neg,
   relu, gelu, softmax, layernorm, crossEntropy,
+  flashAttention,
   sum, reshape, transpose,
   embedding, addGrad,
 } = autograd
@@ -37,8 +45,8 @@ const {
 const {
   createLinear, linear, linearParams,
   createCausalMask,
-  createMultiHeadAttention, multiHeadAttention,
-  createTransformerBlock, transformerBlock, blockParams,
+  createMultiHeadAttention, multiHeadAttention, multiHeadAttentionFlash, multiHeadAttentionCached,
+  createTransformerBlock, transformerBlock, transformerBlockFlash, transformerBlockCached, blockParams,
   countParams,
 } = nn
 
@@ -47,7 +55,7 @@ const {
   CONFIGS, createModel, forward, modelParams, modelInfo,
 } = model
 
-const { generate, topKPredictions } = gen
+const { generate, generateCached, topKPredictions } = gen
 const { saveCheckpoint, loadCheckpoint } = ckpt
 
 // Device info
@@ -71,25 +79,32 @@ const smith = {
   // Ops (on variables)
   add, sub, mul, matmul, scale, neg,
   relu, gelu, softmax, layernorm, crossEntropy,
+  flashAttention,
   sum, reshape, transpose,
   embedding, addGrad,
 
   // Neural network
   createLinear, linear, linearParams,
   createCausalMask,
-  createMultiHeadAttention, multiHeadAttention,
-  createTransformerBlock, transformerBlock, blockParams,
+  createMultiHeadAttention, multiHeadAttention, multiHeadAttentionFlash, multiHeadAttentionCached,
+  createTransformerBlock, transformerBlock, transformerBlockFlash, transformerBlockCached, blockParams,
   countParams,
 
   // Model
-  CONFIGS, createModel, forward, modelParams, modelInfo,
+  CONFIGS, createModel, forward, forwardFlash, forwardCached, modelParams, modelInfo,
 
   // Tokenizer
   tokenizer,
 
   // Generation + Checkpoint
-  generate, topKPredictions,
+  generate, generateCached, topKPredictions,
   saveCheckpoint, loadCheckpoint,
+
+  // Safetensors
+  parseSafetensors, readTensor, listTensors,
+  loadSafetensors, loadGPT2Safetensors,
+  exportSafetensors, saveSafetensors,
+  mapGPT2Weights,
 
   // Quantization
   quantizeQ4, matmulQ4,
@@ -115,17 +130,22 @@ export {
   variable, param, backward, zeroGrad, noGrad,
   add, sub, mul, matmul, scale, neg,
   relu, gelu, softmax, layernorm, crossEntropy,
+  flashAttention,
   sum, reshape, transpose,
   embedding, addGrad,
   createLinear, linear, linearParams,
   createCausalMask,
-  createMultiHeadAttention, multiHeadAttention,
-  createTransformerBlock, transformerBlock, blockParams,
+  createMultiHeadAttention, multiHeadAttention, multiHeadAttentionFlash, multiHeadAttentionCached,
+  createTransformerBlock, transformerBlock, transformerBlockFlash, transformerBlockCached, blockParams,
   countParams,
-  CONFIGS, createModel, forward, modelParams, modelInfo,
+  CONFIGS, createModel, forward, forwardFlash, forwardCached, modelParams, modelInfo,
   tokenizer,
-  generate, topKPredictions,
+  generate, generateCached, topKPredictions,
   saveCheckpoint, loadCheckpoint,
+  parseSafetensors, readTensor, listTensors,
+  loadSafetensors, loadGPT2Safetensors,
+  exportSafetensors, saveSafetensors,
+  mapGPT2Weights,
   quantizeQ4, matmulQ4,
   createAdamW, adamwStep,
   createSchedule, getLr,

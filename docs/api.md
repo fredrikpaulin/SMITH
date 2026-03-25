@@ -37,6 +37,8 @@ All ops return new Variables with backward functions.
 
 **Matrix:** `matmul(a, b)` — supports 2D and batched
 
+**Attention:** `flashAttention(q, k, v, causal?)` — fused tiled attention, O(n) memory
+
 **Activation:** `relu(a)`, `gelu(a)`
 
 **Normalization:** `softmax(a, axis?)`, `layernorm(a, gamma, beta, eps?)`
@@ -75,8 +77,12 @@ const norm = clipGradNorm(params, maxNorm)
 | `linear(x, layer)` | Forward pass |
 | `createMultiHeadAttention(dim, heads)` | MHA with Q/K/V/out projections |
 | `multiHeadAttention(x, layer, mask)` | Forward with causal mask |
+| `multiHeadAttentionFlash(x, layer, causal?)` | Flash attention forward (O(n) memory) |
+| `multiHeadAttentionCached(x, layer, cache)` | Single-token forward, appends K/V to cache |
 | `createTransformerBlock(dim, heads, ffnDim?)` | Pre-norm block |
 | `transformerBlock(x, block, mask)` | Attention + FFN + residuals |
+| `transformerBlockFlash(x, block)` | Flash attention block (O(n) memory) |
+| `transformerBlockCached(x, block, cache)` | Single-token block with KV cache |
 | `createCausalMask(seqLen)` | Upper-triangle -Infinity mask |
 
 ## Model
@@ -84,6 +90,8 @@ const norm = clipGradNorm(params, maxNorm)
 ```js
 const model = createModel({ vocabSize, numLayers, numHeads, dim, maxSeqLen })
 const { logits } = forward(model, tokenIds)
+const { logits } = forwardFlash(model, tokenIds)  // O(n) memory attention
+const { logits, newCaches } = forwardCached(model, tokenId, position, kvCaches)
 const params = modelParams(model)
 const info = modelInfo(model)
 ```
@@ -93,9 +101,46 @@ Preset configs: `CONFIGS.tiny`, `CONFIGS.small`, `CONFIGS.medium`.
 ## Generation
 
 ```js
-import { generate } from './src/generate.js'
+// Full context (recomputes everything each token)
 const ids = generate(model, promptIds, { maxTokens, temperature, topK, topP, repetitionPenalty })
+
+// KV cache (O(1) per token after prompt)
+const ids = generateCached(model, promptIds, { maxTokens, temperature, topK, topP, repetitionPenalty })
 ```
+
+## Safetensors
+
+```js
+// Parse a safetensors file
+const buf = await Bun.file('model.safetensors').arrayBuffer()
+const parsed = parseSafetensors(buf)
+
+// Inspect contents
+const tensors = listTensors(parsed) // [{ name, shape, dtype }]
+const t = readTensor(parsed, 'transformer.wte.weight') // { data, shape, dtype }
+
+// Load GPT-2 weights (infers config from tensor shapes)
+const model = await loadGPT2Safetensors('model.safetensors')
+
+// Load into existing model
+const parsed = (await loadSafetensors('model.safetensors')).parsed
+mapGPT2Weights(parsed, model)
+
+// Export model to safetensors format
+const buf = exportSafetensors(model)
+await saveSafetensors(model, 'output.safetensors')
+```
+
+| Function | Description |
+|----------|-------------|
+| `parseSafetensors(buffer)` | Parse safetensors ArrayBuffer → `{ tensors, buffer, header }` |
+| `readTensor(parsed, name)` | Read named tensor → `{ data, shape, dtype }` |
+| `listTensors(parsed)` | List all tensor names, shapes, dtypes |
+| `loadSafetensors(path)` | Load file → `{ parsed, tensors }` |
+| `loadGPT2Safetensors(path, overrides?)` | Load GPT-2 model from safetensors (infers config) |
+| `mapGPT2Weights(parsed, model)` | Map GPT-2 weights into existing Smith model |
+| `exportSafetensors(model)` | Export model → safetensors ArrayBuffer |
+| `saveSafetensors(model, path)` | Export and write to disk |
 
 ## Checkpoint
 
