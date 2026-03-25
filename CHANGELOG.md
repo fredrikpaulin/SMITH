@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.15.0 — Phase 15: Vision Model Loading (2026-03-25)
+
+### Added
+
+- **ResNet builder** (`src/resnet.js`) — Creates ResNet-18/34 (BasicBlock) and ResNet-50/101/152 (Bottleneck). Stem: 7×7 conv stride 2 → BN → ReLU → maxpool. Four residual stages with configurable blocks and downsampling. Global average pool → FC classifier head. `loadResNet(path, opts)` loads torchvision-format safetensors.
+- **CLIP model** (`src/clip.js`) — ViT-B/32, ViT-B/16, ViT-L/14 vision encoders + transformer text encoder + contrastive projection heads. Non-causal attention for vision, causal for text. `loadCLIP(path, opts)` loads OpenAI CLIP safetensors format, including fused `in_proj_weight` split into Q/K/V.
+- **Image preprocessing** (`src/vision.js`) — `resizeBilinear`, `centerCrop`, `normalize` for CPU-side image processing. `preprocessResNet` and `preprocessCLIP` as ready-to-use pipelines. `loadPPM` for dependency-free P6 image loading.
+- **Tests** (`tests/vision.test.js`) — Preprocessing correctness, ResNet block shapes and forward/backward, CLIP model structure and forward, l2 normalization, similarity matrix, integration pipelines.
+
 ## 0.14.0 — Phase 14: im2col Convolution Path (2026-03-25)
 
 ### Added

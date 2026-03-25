@@ -22,6 +22,21 @@ import { transformWeights as winogradTransformWeights, canUseWinograd } from './
 import { shouldUseIm2col } from './ops/conv2d_im2col.js'
 import { poolOutputSize } from './ops/pool2d.js'
 import {
+  createResNet, forwardResNet, resnetParams,
+  mapResNetWeights, loadResNet, RESNET_CONFIGS,
+} from './resnet.js'
+import {
+  createCLIP, forwardVision, forwardText,
+  clipSimilarity, l2Normalize, clipParams,
+  mapCLIPWeights, loadCLIP, CLIP_CONFIGS,
+} from './clip.js'
+import {
+  resizeBilinear, centerCrop, normalize as normalizeImage,
+  rgbaToChw, rgbToChw,
+  preprocessResNet, preprocessCLIP,
+  loadPPM, IMAGENET_MEAN, IMAGENET_STD, CLIP_MEAN, CLIP_STD,
+} from './vision.js'
+import {
   parseSafetensors, readTensor, listTensors,
   loadSafetensors, loadGPT2Safetensors,
   exportSafetensors, saveSafetensors,
@@ -147,6 +162,15 @@ const smith = {
 
   // RoPE / RMSNorm / SwiGLU
   rope, rmsNorm, swiglu, precomputeRoPE,
+
+  // Vision models
+  createResNet, forwardResNet, resnetParams, mapResNetWeights, loadResNet, RESNET_CONFIGS,
+  createCLIP, forwardVision, forwardText, clipSimilarity, l2Normalize, clipParams, mapCLIPWeights, loadCLIP, CLIP_CONFIGS,
+
+  // Image preprocessing
+  resizeBilinear, centerCrop, normalizeImage,
+  rgbaToChw, rgbToChw, preprocessResNet, preprocessCLIP,
+  loadPPM, IMAGENET_MEAN, IMAGENET_STD, CLIP_MEAN, CLIP_STD,
 }
 
 export default smith
@@ -184,4 +208,9 @@ export {
   createBatchNorm, convOutputSize, poolOutputSize,
   winogradTransformWeights, canUseWinograd, shouldUseIm2col,
   rope, rmsNorm, swiglu, precomputeRoPE,
+  createResNet, forwardResNet, resnetParams, mapResNetWeights, loadResNet, RESNET_CONFIGS,
+  createCLIP, forwardVision, forwardText, clipSimilarity, l2Normalize, clipParams, mapCLIPWeights, loadCLIP, CLIP_CONFIGS,
+  resizeBilinear, centerCrop, normalizeImage,
+  rgbaToChw, rgbToChw, preprocessResNet, preprocessCLIP,
+  loadPPM, IMAGENET_MEAN, IMAGENET_STD, CLIP_MEAN, CLIP_STD,
 }

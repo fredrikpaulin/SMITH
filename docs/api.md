@@ -195,6 +195,41 @@ const out = matmulQ4(activations, wq)  // q4 matmul on GPU
 // Q8 matmul also available: matmulQ8(activations, bQuant)
 ```
 
+## Vision Models
+
+Load pretrained ResNet and CLIP models from safetensors files. Includes image preprocessing utilities.
+
+```js
+import smith from './src/index.js'
+
+// ResNet inference
+const { forward } = await smith.loadResNet('resnet50.safetensors', { variant: 'resnet50' })
+const input = smith.preprocessResNet(rgbaPixels, width, height)
+const logits = forward(smith.variable(input, { requiresGrad: false }), false)
+
+// CLIP: encode image and text
+const clip = await smith.loadCLIP('clip-vit-b-32.safetensors', { variant: 'ViT-B/32' })
+const imgEmbed = clip.encodeImage(imageInput)
+const txtEmbed = clip.encodeText([49406, 320, 1125, 539, 320, 2368, 49407])
+const similarity = clip.similarity(imgEmbed, txtEmbed)
+```
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `createResNet` | `(variant, numClasses)` | Build ResNet model (resnet18/34/50/101/152) |
+| `forwardResNet` | `(model, x, training)` | Forward pass, returns `[N, numClasses]` logits |
+| `loadResNet` | `(path, opts?)` | Load pretrained weights from safetensors |
+| `createCLIP` | `(variant)` | Build CLIP model (ViT-B/32, ViT-B/16, ViT-L/14) |
+| `forwardVision` | `(model, x)` | Encode images → `[N, embedDim]` |
+| `forwardText` | `(model, tokenIds)` | Encode text → `[1, embedDim]` |
+| `loadCLIP` | `(path, opts?)` | Load pretrained CLIP from safetensors |
+| `clipSimilarity` | `(imgFeats, txtFeats, logitScale)` | Cosine similarity matrix |
+| `preprocessResNet` | `(pixels, w, h, opts?)` | Resize → crop 224 → ImageNet normalize → tensor |
+| `preprocessCLIP` | `(pixels, w, h, opts?)` | Resize → crop 224 → CLIP normalize → tensor |
+| `loadPPM` | `(buffer)` | Parse PPM P6 image → `{ pixels, width, height }` |
+
+Image utilities: `resizeBilinear`, `centerCrop`, `normalize`, `rgbaToChw`, `rgbToChw`.
+
 ## GGUF Import
 
 Load models from GGUF files (llama.cpp, ollama format). Supports Llama, Phi, and GPT-2 architectures with Q4_0, Q4_1, Q8_0, F16, and F32 weight types.
