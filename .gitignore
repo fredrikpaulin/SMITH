@@ -8,3 +8,4 @@ shaders/*.air
 pr/
 CLAUDE.md
 ARCHITECTURE.md
+models/*

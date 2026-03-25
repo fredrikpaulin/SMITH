@@ -12,7 +12,7 @@ import * as tokenizer from './tokenizer.js'
 import * as gen from './generate.js'
 import * as ckpt from './checkpoint.js'
 import { quantizeQ4, matmulQ4, matmulQ8 } from './ops/quantize.js'
-import { loadGGUF } from './gguf_loader.js'
+import { loadGGUF, createGGUFCache, resetCache as resetGGUFCache, generateGGUF } from './gguf_loader.js'
 import { parseGGUF, listTensors as listGGUFTensors, extractConfig as extractGGUFConfig } from './gguf.js'
 import { poolStats, poolDrain } from './pool.js'
 import { dtypeBytes, toFloat16, fromFloat16, float32ToFloat16, float16ToFloat32 } from './dtype.js'
@@ -119,6 +119,7 @@ const smith = {
 
   // GGUF
   loadGGUF, parseGGUF, listGGUFTensors, extractGGUFConfig,
+  createGGUFCache, resetGGUFCache, generateGGUF,
 
   // Optimizer
   createAdamW, adamwStep,
@@ -143,9 +144,6 @@ const smith = {
 
   // RoPE / RMSNorm / SwiGLU
   rope, rmsNorm, swiglu, precomputeRoPE,
-
-  // GGUF
-  loadGGUF, parseGGUF, listGGUFTensors, extractGGUFConfig,
 }
 
 export default smith
@@ -177,6 +175,7 @@ export {
   info, poolStats, poolDrain,
   f16Mode, defaultDtype, cast, createLossScaler,
   loadGGUF, parseGGUF, listGGUFTensors, extractGGUFConfig,
+  createGGUFCache, resetGGUFCache, generateGGUF,
   matmulQ8,
   conv2d, maxPool2d, avgPool2d, batchnorm,
   createBatchNorm, convOutputSize, poolOutputSize,

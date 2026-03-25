@@ -16,6 +16,11 @@ import {
   countParams,
 } from './nn.js'
 import {
+  createGGUFCache, resetCache,
+  forwardLlamaCachedDecode, forwardLlamaCachedPrefill,
+  generateGGUF,
+} from './gguf_cache.js'
+import {
   parseGGUF, extractConfig, dequantizeTensor, readTensorData,
   GGML_TYPE, GGML_TYPE_INFO,
 } from './gguf.js'
@@ -388,9 +393,14 @@ async function loadGGUF(path) {
     skipped,
     forward: (tokenIds) => {
       if (config.arch === 'llama') return forwardLlama(model, tokenIds)
-      // For GPT-2 style models, fall back to the standard forward
       throw new Error(`Forward not implemented for ${config.arch} via GGUF loader`)
     },
+    // KV-cached forward: prefill + decode
+    createCache: () => createGGUFCache(model.config),
+    forwardPrefill: (tokenIds, caches) => forwardLlamaCachedPrefill(model, tokenIds, caches),
+    forwardDecode: (tokenId, position, caches) => forwardLlamaCachedDecode(model, tokenId, position, caches),
+    generate: (promptIds, genConfig, callbacks) => generateGGUF(model, promptIds, genConfig, callbacks),
+    resetCache,
   }
 }
 
@@ -400,4 +410,6 @@ export {
   repeatKVHeads, forwardLlama,
   getWeightMap, resolveWeight, resolvePath,
   LLAMA_MAP, PHI_MAP, GPT2_MAP,
+  createGGUFCache, resetCache, generateGGUF,
+  forwardLlamaCachedDecode, forwardLlamaCachedPrefill,
 }

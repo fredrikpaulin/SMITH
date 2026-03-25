@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.12.0 — Phase 12: KV Cache for GGUF Models (2026-03-25)
+
+### Added
+
+- **KV cache management** (`src/gguf_cache.js`) — Pre-allocated fixed-size `[kvHeads, maxSeqLen, headDim]` buffers per layer with position tracking. `createGGUFCache`, `resetCache`, `cacheAppend` (single token), `cachePrefill` (full prompt), `cacheSlice` (extract active range). `repeatKV` for GQA head repetition.
+- **Cached Llama forward** — `forwardLlamaCachedPrefill` processes the full prompt in one pass using flash attention (causal) and populates the cache. `forwardLlamaCachedDecode` processes a single token using matmul+softmax attention against cached K/V. Both support GQA.
+- **`generateGGUF`** — High-level generation entry point. Prefill phase processes the prompt via flash attention, then decode phase generates tokens one-by-one with cached K/V. Supports temperature, top-k, top-p, repetition penalty, EOS stop, and `onToken` callback.
+- **`loadGGUF` updated** — Return object now includes `createCache`, `forwardPrefill`, `forwardDecode`, `generate`, and `resetCache` alongside the existing `forward`.
+- **Tests** (`tests/gguf_cache.test.js`) — Cache allocation, append, prefill, slice, GQA head repetition, cached forward shapes and finiteness, prefill-vs-decode consistency, generateGGUF with maxTokens/EOS/callbacks/determinism, weight-tied model support.
+
 ## 0.11.0 — Phase 11: GPU RoPE, RMSNorm, SwiGLU (2026-03-25)
 
 ### Added

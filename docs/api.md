@@ -297,3 +297,42 @@ smith.backward(loss)
 | `rope` | `(input, ropeTable, startPos?)` | Apply rotary position embeddings (autograd) |
 | `rmsNorm` | `(input, gamma, eps?)` | RMS normalization (autograd) |
 | `swiglu` | `(gate, up)` | Fused SiLU(gate) × up (autograd) |
+
+## GGUF KV Cache
+
+KV cache for GGUF-loaded Llama-style models. Prefill processes the full prompt in one pass via flash attention, then decode generates tokens one at a time with O(1) per-token compute. Supports Grouped Query Attention (GQA) where KV heads < Q heads.
+
+```js
+import { loadGGUF } from './src/gguf_loader.js'
+
+const { model, generate, createCache, forwardPrefill, forwardDecode, resetCache } = await loadGGUF('model.gguf')
+
+// Option 1: high-level generation
+const tokens = generate([1, 2, 3], {
+  maxTokens: 50,
+  temperature: 0.8,
+  topK: 40,
+  topP: 0.95,
+  repetitionPenalty: 1.1,
+  eosToken: 2,
+}, {
+  onToken: (tok, step) => process.stdout.write(tokenizer.decode([tok])),
+})
+
+// Option 2: manual cache control
+const caches = createCache()
+const prefillResult = forwardPrefill([1, 2, 3], caches)       // full prompt
+const decodeResult = forwardDecode(nextToken, 3, caches)       // one token at position 3
+resetCache(caches)                                              // reuse for new prompt
+```
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `loadGGUF` | `(path) → { model, generate, createCache, ... }` | Load GGUF and return model with cached generation |
+| `generate` | `(promptIds, config?, callbacks?)` | Prefill+decode generation with sampling |
+| `createCache` | `() → caches` | Allocate KV cache buffers for the model |
+| `forwardPrefill` | `(tokenIds, caches) → { logits }` | Process full prompt via flash attention |
+| `forwardDecode` | `(tokenId, position, caches) → { logits }` | Generate one token using cached K/V |
+| `resetCache` | `(caches)` | Zero positions to reuse cache buffers |
+
+Generation config: `{ maxTokens, temperature, topK, topP, repetitionPenalty, eosToken }`. Callbacks: `{ onToken(token, step) }` — return `true` to stop.
