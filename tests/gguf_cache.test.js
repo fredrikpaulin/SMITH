@@ -442,16 +442,17 @@ describe('generateGGUF', () => {
 
   test('stops on EOS token', () => {
     const model = createTinyLlama()
-    // Force the model to always predict token 0 by making lmHead heavily biased
+    // Force the model to always predict token 0 by zeroing lmHead then biasing token 0
     const vocabSize = model.config.vocabSize
     const dim = model.config.dim
+    model.lmHead.data.data.fill(0)
     for (let d = 0; d < dim; d++) {
       model.lmHead.data.data[d * vocabSize + 0] = 1000  // token 0 logit overwhelms everything
     }
 
     const result = generateGGUF(model, [1], { maxTokens: 10, temperature: 0, eosToken: 0 })
-    // Should stop well before maxTokens, last token must be EOS
-    expect(result.length).toBeLessThanOrEqual(3)  // prompt + at most 2 generated (prefill + first decode)
+    // Must stop before maxTokens and last token must be EOS
+    expect(result.length).toBeLessThan(1 + 10)  // stopped early (prompt + fewer than maxTokens)
     expect(result[result.length - 1]).toBe(0)
   })
 

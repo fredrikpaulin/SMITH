@@ -232,7 +232,7 @@ Image utilities: `resizeBilinear`, `centerCrop`, `normalize`, `rgbaToChw`, `rgbT
 
 ## GGUF Import
 
-Load models from GGUF files (llama.cpp, ollama format). Supports Llama, Phi, and GPT-2 architectures with Q4_0, Q4_1, Q8_0, F16, and F32 weight types.
+Load models from GGUF files (llama.cpp, ollama format). Supports Llama, Phi, and GPT-2 architectures for inference. Dequantization supports Q4_0, Q4_1, Q5_0, Q8_0, Q4_K, Q6_K, F16, BF16, and F32 weight types.
 
 ```js
 // Load a GGUF model
@@ -255,7 +255,9 @@ const config = smith.extractGGUFConfig(parsed.metadata)
 | `listGGUFTensors(parsed)` | List tensor names, shapes, types, byte sizes |
 | `extractGGUFConfig(metadata)` | Extract model config (arch, dim, layers, heads, RoPE, etc.) |
 
-Supported architectures: `llama` (Llama 2/3, Mistral, CodeLlama, TinyLlama), `phi`/`phi2`/`phi3`, `gpt2`.
+Supported architectures for forward pass: `llama` (Llama 2/3, Mistral, CodeLlama, TinyLlama), `phi`/`phi2`/`phi3`, `gpt2`. The GGUF parser supports any architecture — use `parseGGUF` + `extractConfig` + `dequantizeTensor` for unsupported archs.
+
+Supported quantization types for dequantization: F32, F16, BF16, Q4_0, Q4_1, Q5_0, Q8_0, Q4_K, Q6_K.
 
 ## Convolutions
 

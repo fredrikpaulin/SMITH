@@ -1,6 +1,6 @@
 {
   "name": "smith",
-  "version": "0.16.0",
+  "version": "0.16.1",
   "description": "Metal GPU compute for Bun — tensors, autograd, transformers, convnets, GGUF/safetensors model loading, and vision (ResNet, CLIP) on Apple Silicon",
   "type": "module",
   "main": "src/index.js",

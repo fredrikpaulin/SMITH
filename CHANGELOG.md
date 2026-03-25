@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.16.1 — GGUF Parser Fixes and K-Quant Dequantization (2026-03-25)
+
+### Fixed
+
+- **GGUF magic constant** — Fixed endianness bug: `0x46475547` → `0x46554747`. The parser now correctly reads real GGUF files (was only working with synthetic test files that shared the same bug).
+
+### Added
+
+- **Q4_K dequantization** — Super-block dequantizer for Q4_K format (256-element blocks with 6-bit packed scales/mins). Handles the sub-block structure used in GGML's k-quant family.
+- **Q6_K dequantization** — 6-bit dequantizer with split low/high nibbles and signed int8 sub-block scales. 210 bytes per 256-element block.
+- **Q5_0 dequantization** — 5-bit format with 32-bit high-bit mask. 22 bytes per 32-element block.
+- **GGML_TYPE_INFO entries** for Q5_0, Q4_K, Q6_K — block sizes and bytes-per-block now defined, enabling `tensorBytes()` and `listTensors()` for models using these types.
+- **Integration test** (`tests/gguf_model.test.js`) — 30 tests, 11485 expect() calls against real Nemotron-H 4B Q4_K_M model. Validates: GGUF parsing, metadata/config extraction, hybrid architecture detection (attention + SSM layers), tensor type distribution, per-type dequantization (F32, Q5_0, Q4_K, Q6_K, Q8_0), tensor shapes vs architecture dimensions, data offset integrity.
+
 ## 0.16.0 — Phase 16: Profiling and Benchmarking (2026-03-25)
 
 ### Added

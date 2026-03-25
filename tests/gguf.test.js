@@ -46,7 +46,7 @@ function buildGGUF(opts = {}) {
   function writeU8(v) { parts.push(new Uint8Array([v])) }
 
   // Magic + version
-  writeU32(0x46475547) // "GGUF"
+  writeU32(0x46554747) // "GGUF" in little-endian
   writeU32(version)
 
   // Tensor count and metadata count

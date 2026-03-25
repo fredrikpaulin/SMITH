@@ -34,6 +34,9 @@ const GGML_TYPE_INFO = {
   [GGML_TYPE.Q4_1]: { blockSize: 32, bytesPerBlock: 20 },  // 16 nibbles + 2 scale + 2 min (fp16)
   [GGML_TYPE.Q8_0]: { blockSize: 32, bytesPerBlock: 34 },  // 32 int8 + 2 bytes scale (fp16)
   [GGML_TYPE.Q8_1]: { blockSize: 32, bytesPerBlock: 36 },  // 32 int8 + 2 scale + 2 min (fp16)
+  [GGML_TYPE.Q5_0]: { blockSize: 32, bytesPerBlock: 22 },  // 2 fp16 scale + 4 high-bits + 16 nibbles
+  [GGML_TYPE.Q4_K]: { blockSize: 256, bytesPerBlock: 144 }, // 2 fp16 d + 2 fp16 dmin + 12 scales + 128 qs
+  [GGML_TYPE.Q6_K]: { blockSize: 256, bytesPerBlock: 210 }, // 128 ql + 64 qh + 16 scales + 2 fp16 d
   [GGML_TYPE.BF16]: { blockSize: 1, bytesPerBlock: 2 },
 }
 
@@ -124,9 +127,9 @@ function readValueFixed(r, type) {
 function parseGGUF(buffer) {
   const r = createReader(buffer)
 
-  // Magic: "GGUF" = 0x46475547
+  // Magic: "GGUF" = 0x46554747 (little-endian)
   const magic = r.u32()
-  if (magic !== 0x46475547) throw new Error(`Not a GGUF file (magic: 0x${magic.toString(16)})`)
+  if (magic !== 0x46554747) throw new Error(`Not a GGUF file (magic: 0x${magic.toString(16)})`)
 
   const version = r.u32()
   if (version < 2 || version > 3) throw new Error(`Unsupported GGUF version: ${version}`)
@@ -227,6 +230,114 @@ function dequantQ8_0(blockData, blockOffset) {
   return values
 }
 
+// --- Dequantize Q5_0 block to f32 ---
+// Q5_0 block: 2 bytes fp16 scale + 4 bytes high-bits + 16 bytes (32 nibbles)
+// Layout: [scale_fp16(2)] [high_bits(4)] [nibbles(16)]
+// val = scale * ((nibble | (high_bit << 4)) - 16)
+
+function dequantQ5_0(blockData, blockOffset) {
+  const scaleU16 = blockData[blockOffset] | (blockData[blockOffset + 1] << 8)
+  const scale = fromFloat16(scaleU16)
+  const values = new Float32Array(32)
+
+  // High bits: 4 bytes = 32 bits, one per element
+  const hb0 = blockData[blockOffset + 2]
+  const hb1 = blockData[blockOffset + 3]
+  const hb2 = blockData[blockOffset + 4]
+  const hb3 = blockData[blockOffset + 5]
+  const highBits = hb0 | (hb1 << 8) | (hb2 << 16) | ((hb3 << 24) >>> 0)
+
+  for (let i = 0; i < 32; i++) {
+    const byteIdx = blockOffset + 6 + (i >> 1)
+    const nibble = (i & 1) ? (blockData[byteIdx] >> 4) : (blockData[byteIdx] & 0x0F)
+    const hBit = (highBits >> i) & 1
+    values[i] = scale * ((nibble | (hBit << 4)) - 16)
+  }
+  return values
+}
+
+// --- Dequantize Q4_K block to f32 ---
+// Q4_K super-block: 256 elements
+// Layout: [d_fp16(2)] [dmin_fp16(2)] [scales(12)] [qs(128)]
+// 8 sub-blocks of 32 elements each, with 6-bit scales packed in 12 bytes
+
+function dequantQ4_K(blockData, blockOffset) {
+  const dU16 = blockData[blockOffset] | (blockData[blockOffset + 1] << 8)
+  const dminU16 = blockData[blockOffset + 2] | (blockData[blockOffset + 3] << 8)
+  const d = fromFloat16(dU16)
+  const dmin = fromFloat16(dminU16)
+
+  const values = new Float32Array(256)
+  const scalesOff = blockOffset + 4
+  const qsOff = blockOffset + 16 // 4 + 12
+
+  // Decode the packed 6-bit scales and mins from 12 bytes
+  // Lower 4 bits of each scale byte hold scales for sub-blocks 0-7
+  // Upper 4 bits hold mins for sub-blocks 0-7
+  // Bytes 8-11 hold 2-bit high parts for scales and mins
+  const sc = new Float32Array(8)
+  const mn = new Float32Array(8)
+
+  for (let i = 0; i < 8; i++) {
+    let scVal, mnVal
+    if (i < 4) {
+      scVal = blockData[scalesOff + i] & 0x3F
+      mnVal = blockData[scalesOff + 4 + i] & 0x3F
+    } else {
+      scVal = (blockData[scalesOff + i - 4] >> 6) | ((blockData[scalesOff + (i - 4) + 8] & 0x0F) << 2)
+      mnVal = (blockData[scalesOff + i] >> 6) | ((blockData[scalesOff + (i - 4) + 8] >> 4) << 2)
+    }
+    sc[i] = d * scVal
+    mn[i] = dmin * mnVal
+  }
+
+  for (let j = 0; j < 256; j++) {
+    const subBlock = j >> 5 // which sub-block (0-7)
+    const qByte = blockData[qsOff + (j >> 1)]
+    const nibble = (j & 1) ? (qByte >> 4) : (qByte & 0x0F)
+    values[j] = sc[subBlock] * nibble - mn[subBlock]
+  }
+
+  return values
+}
+
+// --- Dequantize Q6_K block to f32 ---
+// Q6_K super-block: 256 elements
+// Layout: [ql(128)] [qh(64)] [scales(16)] [d_fp16(2)]
+// 6-bit quantization: low 4 bits in ql, high 2 bits in qh
+
+function dequantQ6_K(blockData, blockOffset) {
+  const qlOff = blockOffset
+  const qhOff = blockOffset + 128
+  const scOff = blockOffset + 192
+  const dU16 = blockData[blockOffset + 208] | (blockData[blockOffset + 209] << 8)
+  const d = fromFloat16(dU16)
+
+  const values = new Float32Array(256)
+
+  for (let j = 0; j < 256; j++) {
+    // Low 4 bits from ql
+    const qlByte = blockData[qlOff + (j >> 1)]
+    const ql = (j & 1) ? (qlByte >> 4) : (qlByte & 0x0F)
+
+    // High 2 bits from qh
+    const qhIdx = j >> 2  // 4 elements per qh byte
+    const qhShift = (j & 3) * 2
+    const qh = (blockData[qhOff + qhIdx] >> qhShift) & 0x03
+
+    const q = ql | (qh << 4) // 6-bit value (0-63)
+
+    // Scale: 16 sub-blocks of 16 elements each, scales are int8
+    const scIdx = j >> 4
+    const sc = blockData[scOff + scIdx]
+    const scSigned = sc > 127 ? sc - 256 : sc  // interpret as int8
+
+    values[j] = d * scSigned * (q - 32)
+  }
+
+  return values
+}
+
 // --- Dequantize a full tensor to Float32Array ---
 
 function dequantizeTensor(parsed, tensorInfo) {
@@ -265,7 +376,10 @@ function dequantizeTensor(parsed, tensorInfo) {
   let dequantFn
   if (tensorInfo.type === GGML_TYPE.Q4_0) dequantFn = dequantQ4_0
   else if (tensorInfo.type === GGML_TYPE.Q4_1) dequantFn = dequantQ4_1
+  else if (tensorInfo.type === GGML_TYPE.Q5_0) dequantFn = dequantQ5_0
   else if (tensorInfo.type === GGML_TYPE.Q8_0) dequantFn = dequantQ8_0
+  else if (tensorInfo.type === GGML_TYPE.Q4_K) dequantFn = dequantQ4_K
+  else if (tensorInfo.type === GGML_TYPE.Q6_K) dequantFn = dequantQ6_K
   else throw new Error(`Dequantize not implemented for ${GGML_TYPE_NAME[tensorInfo.type]}`)
 
   for (let b = 0; b < numBlocks; b++) {
@@ -339,5 +453,6 @@ export {
   parseGGUF, listTensors, readTensorData, dequantizeTensor,
   extractConfig, getArch, getMetaValue,
   GGML_TYPE, GGML_TYPE_NAME, GGML_TYPE_INFO, GGUF_TYPE,
-  dequantQ4_0, dequantQ4_1, dequantQ8_0,
+  dequantQ4_0, dequantQ4_1, dequantQ5_0, dequantQ8_0,
+  dequantQ4_K, dequantQ6_K,
 }
