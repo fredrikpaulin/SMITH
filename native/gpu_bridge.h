@@ -97,4 +97,20 @@ void smith_dispatch_sync(void* ctx, void* pipeline,
                          uint64_t grid_x, uint64_t grid_y, uint64_t grid_z,
                          uint64_t group_x, uint64_t group_y, uint64_t group_z);
 
+// --- Profiling ---
+
+// Timing result from a timed dispatch.
+typedef struct {
+  double gpu_start;     // GPU start time in seconds (Mach absolute time)
+  double gpu_end;       // GPU end time in seconds
+  double gpu_ms;        // GPU duration in milliseconds
+} SmithTiming;
+
+// End encoding with timing. Blocks until complete, returns timing info.
+// Caller must free the returned SmithTiming pointer.
+SmithTiming* smith_end_timed(SmithEncoder* enc);
+
+// Get current GPU memory allocation (allocated bytes on device).
+uint64_t smith_allocated_size(void* ctx);
+
 #endif // SMITH_GPU_BRIDGE_H

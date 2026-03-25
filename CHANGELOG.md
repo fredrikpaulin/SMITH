@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.16.0 — Phase 16: Profiling and Benchmarking (2026-03-25)
+
+### Added
+
+- **GPU timing in native bridge** (`native/gpu_bridge.m`) — `smith_end_timed` returns `SmithTiming` struct with `GPUStartTime`/`GPUEndTime` from Metal command buffers. `smith_allocated_size` reports device `currentAllocatedSize`.
+- **Profiler** (`src/profile.js`) — `enableProfiling()`/`disableProfiling()` toggles per-kernel timing in `dispatch.js`. `report()` returns sorted kernel stats (calls, totalMs, avgMs, min, max, % of total) and memory info (start, peak, current, delta). `profile(fn)` wraps a function and returns `{ result, cpuMs, gpuMs, dispatches, kernels, memory }`. `benchmark(name, fn, opts)` runs warmup + N iterations, reports mean/median/p95/min/max/stddev for both CPU and GPU time. `memorySnapshot()` returns current device allocation.
+- **Instrumented dispatch** — `dispatch.js` checks `isProfilingEnabled()` on every `run()` call and uses `endTimed` instead of `endSync` when active. Zero overhead when profiling is disabled (single boolean check).
+- **Tests** (`tests/profile.test.js`) — State management (enable/disable/reset), profile() correctness and observer-effect tests (numerical results unchanged, backward works, conv2d works), benchmark stats, memory tracking, per-kernel stats with percentage validation, sorted output, edge cases.
+
 ## 0.15.0 — Phase 15: Vision Model Loading (2026-03-25)
 
 ### Added

@@ -3,6 +3,7 @@
 // One function, ~40 lines of real logic. Everything else in Smith dispatches through here.
 
 import * as device from './device.js'
+import { isProfilingEnabled, recordKernel } from './profile.js'
 
 // Default threadgroup size for 1D kernels
 const GROUP_1D = 256
@@ -37,7 +38,13 @@ function run(kernel, buffers, grid, group, params) {
   const grpZ = group?.z || 1
 
   device.dispatch(enc, gx, gy, gz, grpX, grpY, grpZ)
-  device.endSync(enc)
+
+  if (isProfilingEnabled()) {
+    const timing = device.endTimed(enc)
+    recordKernel(kernel, timing.gpuMs)
+  } else {
+    device.endSync(enc)
+  }
 }
 
 // Convenience: dispatch an elementwise op on a flat buffer

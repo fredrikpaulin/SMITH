@@ -37,6 +37,10 @@ const { symbols: lib } = dlopen(LIB_PATH, {
   smith_end_sync:                   { returns: FFIType.void, args: [FFIType.ptr] },
   smith_end_async:                  { returns: FFIType.ptr, args: [FFIType.ptr] },
   smith_wait:                       { returns: FFIType.void, args: [FFIType.ptr] },
+
+  // Profiling
+  smith_end_timed:                  { returns: FFIType.ptr, args: [FFIType.ptr] },
+  smith_allocated_size:             { returns: FFIType.u64, args: [FFIType.ptr] },
 })
 
 // Storage mode constants
@@ -152,6 +156,25 @@ function wait(token) {
   lib.smith_wait(token)
 }
 
+// --- Profiling ---
+
+function endTimed(enc) {
+  const timingPtr = lib.smith_end_timed(enc)
+  if (!timingPtr) return { gpuStart: 0, gpuEnd: 0, gpuMs: 0 }
+  // SmithTiming struct: 3 doubles (8 bytes each) = 24 bytes
+  const ab = toArrayBuffer(timingPtr, 0, 24)
+  const f64 = new Float64Array(ab)
+  const result = { gpuStart: f64[0], gpuEnd: f64[1], gpuMs: f64[2] }
+  // Free the timing struct (allocated with calloc in C)
+  // Note: Bun's FFI doesn't provide free(), so we'd leak this.
+  // We'll accept the tiny leak (24 bytes per timed dispatch) for now.
+  return result
+}
+
+function allocatedSize() {
+  return Number(lib.smith_allocated_size(ctx))
+}
+
 // Compile shader from source string (for development / runtime kernels)
 function compileSource(source) {
   const errBuf = new BigInt64Array(1) // pointer to error string
@@ -203,4 +226,8 @@ export {
   endSync,
   endAsync,
   wait,
+
+  // Profiling
+  endTimed,
+  allocatedSize,
 }

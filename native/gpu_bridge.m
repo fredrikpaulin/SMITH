@@ -214,6 +214,31 @@ void smith_wait(void* token) {
 
 // --- Convenience: single-shot dispatch ---
 
+// --- Profiling ---
+
+SmithTiming* smith_end_timed(SmithEncoder* enc) {
+  [enc->encoder endEncoding];
+  [enc->commandBuffer commit];
+  [enc->commandBuffer waitUntilCompleted];
+
+  SmithTiming* timing = calloc(1, sizeof(SmithTiming));
+  timing->gpu_start = enc->commandBuffer.GPUStartTime;
+  timing->gpu_end = enc->commandBuffer.GPUEndTime;
+  timing->gpu_ms = (timing->gpu_end - timing->gpu_start) * 1000.0;
+
+  enc->encoder = nil;
+  enc->commandBuffer = nil;
+  free(enc);
+  return timing;
+}
+
+uint64_t smith_allocated_size(void* ptr) {
+  SmithContext* ctx = (SmithContext*)ptr;
+  return ctx->device.currentAllocatedSize;
+}
+
+// --- Convenience: single-shot dispatch ---
+
 void smith_dispatch_sync(void* ptr, void* pipeline,
                          void** buffers, uint32_t* indices, uint32_t buffer_count,
                          const void* params, uint32_t params_length, uint32_t params_index,

@@ -42,6 +42,12 @@ import {
   exportSafetensors, saveSafetensors,
   mapGPT2Weights,
 } from './safetensors.js'
+import {
+  enableProfiling, disableProfiling, isProfilingEnabled,
+  report as profileReport, resetProfile,
+  profile, benchmark,
+  memorySnapshot,
+} from './profile.js'
 
 // Re-export tensor creation
 const { tensor, zeros, ones, full, rand, randn, scalar, toArray, toString: tensorToString } = T
@@ -171,6 +177,12 @@ const smith = {
   resizeBilinear, centerCrop, normalizeImage,
   rgbaToChw, rgbToChw, preprocessResNet, preprocessCLIP,
   loadPPM, IMAGENET_MEAN, IMAGENET_STD, CLIP_MEAN, CLIP_STD,
+
+  // Profiling
+  enableProfiling, disableProfiling, isProfilingEnabled,
+  profileReport, resetProfile,
+  profile, benchmark,
+  memorySnapshot,
 }
 
 export default smith
@@ -213,4 +225,8 @@ export {
   resizeBilinear, centerCrop, normalizeImage,
   rgbaToChw, rgbToChw, preprocessResNet, preprocessCLIP,
   loadPPM, IMAGENET_MEAN, IMAGENET_STD, CLIP_MEAN, CLIP_STD,
+  enableProfiling, disableProfiling, isProfilingEnabled,
+  profileReport, resetProfile,
+  profile, benchmark,
+  memorySnapshot,
 }

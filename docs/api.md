@@ -386,3 +386,44 @@ resetCache(caches)                                              // reuse for new
 | `resetCache` | `(caches)` | Zero positions to reuse cache buffers |
 
 Generation config: `{ maxTokens, temperature, topK, topP, repetitionPenalty, eosToken }`. Callbacks: `{ onToken(token, step) }` — return `true` to stop.
+
+## Profiling and Benchmarking
+
+Instrument Metal dispatches to collect per-kernel GPU timing and memory usage. Uses `MTLCommandBuffer.GPUStartTime`/`GPUEndTime` for accurate GPU measurement. Zero overhead when disabled.
+
+```js
+import smith from './src/index.js'
+
+// Wrap a function to get timing
+const p = smith.profile(() => {
+  const a = smith.variable(smith.rand([256, 256]), { requiresGrad: false })
+  const b = smith.variable(smith.rand([256, 256]), { requiresGrad: false })
+  return smith.noGrad(() => smith.matmul(a, b))
+})
+// p = { result, cpuMs, gpuMs, dispatches, kernels, memory }
+
+// Benchmark with warmup + iterations
+const b = smith.benchmark('matmul-256', () => {
+  smith.noGrad(() => smith.matmul(a, b))
+}, { warmup: 3, iterations: 10 })
+// b = { name, iterations, cpu: { mean, median, p95, min, max, stddev }, gpu: {...} }
+
+// Manual profiling
+smith.enableProfiling()
+// ... do work ...
+const report = smith.profileReport()
+// report = { dispatches, totalGpuMs, memory, kernels: [{ kernel, calls, totalMs, avgMs, pct }] }
+smith.disableProfiling()
+```
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `profile` | `(fn) → { result, cpuMs, gpuMs, ... }` | Wrap function with full profiling |
+| `benchmark` | `(name, fn, opts?) → stats` | Run N iterations, report CPU/GPU stats |
+| `enableProfiling` | `()` | Start collecting per-kernel timing |
+| `disableProfiling` | `()` | Stop collecting timing |
+| `profileReport` | `() → report` | Get kernel stats, sorted by total time |
+| `resetProfile` | `()` | Clear all collected stats |
+| `memorySnapshot` | `() → { allocatedBytes }` | Current GPU memory allocation |
+
+Benchmark options: `{ warmup, iterations }` — defaults: `3`, `10`.
