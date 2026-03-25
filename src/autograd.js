@@ -19,6 +19,7 @@ import { reshape as gpuReshape } from './ops/reshape.js'
 import { flashAttentionForward as gpuFlashFwd, flashAttentionBackward as gpuFlashBwd } from './ops/flash_attention.js'
 import { conv2dForward as gpuConv2dFwd, conv2dBackwardInput as gpuConv2dBwdInput, conv2dBackwardWeight as gpuConv2dBwdWeight, conv2dBackwardBias as gpuConv2dBwdBias, convOutputSize } from './ops/conv2d.js'
 import { canUseWinograd, winogradForward as gpuWinogradFwd, winogradBackwardInput as gpuWinogradBwdInput } from './ops/conv2d_winograd.js'
+import { shouldUseIm2col, im2colForward as gpuIm2colFwd, im2colBackwardInput as gpuIm2colBwdInput, im2colBackwardWeight as gpuIm2colBwdWeight } from './ops/conv2d_im2col.js'
 import { maxPool2dForward as gpuMaxPool2dFwd, maxPool2dBackward as gpuMaxPool2dBwd, avgPool2dForward as gpuAvgPool2dFwd, avgPool2dBackward as gpuAvgPool2dBwd } from './ops/pool2d.js'
 import { batchnormForward as gpuBnFwd, batchnormInference as gpuBnInfer, batchnormBackward as gpuBnBwd, createBatchNorm } from './ops/batchnorm.js'
 import { ropeForward as gpuRopeFwd, ropeBackward as gpuRopeBwd, precomputeRoPE } from './ops/rope.js'
@@ -370,15 +371,29 @@ function crossEntropy(logits, targets) {
 
 function conv2d(input, weight, bias, opts = {}) {
   const useWinograd = canUseWinograd(weight.data, opts)
-  const fwd = useWinograd ? gpuWinogradFwd : gpuConv2dFwd
-  const bwdInput = useWinograd ? gpuWinogradBwdInput : gpuConv2dBwdInput
+  const useIm2col = !useWinograd && shouldUseIm2col(weight.data, opts)
+
+  let fwd, bwdInput, bwdWeight
+  if (useWinograd) {
+    fwd = gpuWinogradFwd
+    bwdInput = gpuWinogradBwdInput
+    bwdWeight = gpuConv2dBwdWeight  // Winograd weight grad uses direct
+  } else if (useIm2col) {
+    fwd = gpuIm2colFwd
+    bwdInput = gpuIm2colBwdInput
+    bwdWeight = gpuIm2colBwdWeight
+  } else {
+    fwd = gpuConv2dFwd
+    bwdInput = gpuConv2dBwdInput
+    bwdWeight = gpuConv2dBwdWeight
+  }
+
   const outData = fwd(input.data, weight.data, bias ? bias.data : null, opts)
   return variable(outData, {
     _deps: bias ? [input, weight, bias] : [input, weight],
     _backward: _noGrad ? null : (grad) => {
       addGrad(input, bwdInput(grad, weight.data, input.data.shape, opts))
-      // Weight gradient always uses direct conv (Winograd weight grad is complex, not worth it)
-      addGrad(weight, gpuConv2dBwdWeight(input.data, grad, weight.data.shape, opts))
+      addGrad(weight, bwdWeight(input.data, grad, weight.data.shape, opts))
       if (bias) addGrad(bias, gpuConv2dBwdBias(grad))
     },
   })

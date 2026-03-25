@@ -267,6 +267,14 @@ Conv2d options: `{ stride, padding, dilation, groups }` — each accepts scalar 
 | `canUseWinograd` | `(weight, opts)` | Check if Winograd is applicable |
 | `winogradTransformWeights` | `(weight)` | Pre-transform `[outC, inC, 3, 3]` → `[outC, inC, 4, 4]` |
 
+**im2col auto-dispatch:** For kernels larger than 3×3 (e.g. 5×5, 7×7) or strided/dilated 3×3, `conv2d()` automatically uses im2col + GEMM. Input patches are rearranged into a column matrix `[inC*kH*kW, outH*outW]`, then multiplied by the flattened weight matrix using the existing tiled matmul shader. Trades memory for compute efficiency on larger kernels.
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `shouldUseIm2col` | `(weight, opts)` | Check if im2col path will be used |
+
+**3-way dispatch priority:** Winograd (3×3 stride-1 dilation-1) > im2col (larger kernels, strided 3×3) > direct (1×1 pointwise).
+
 Pool options: `{ kernelSize, stride, padding }` — each accepts scalar or `[H, W]` array. Stride defaults to kernelSize.
 
 BatchNorm options: `{ eps, momentum }` — defaults: `1e-5`, `0.1`.

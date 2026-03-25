@@ -19,6 +19,7 @@ import { dtypeBytes, toFloat16, fromFloat16, float32ToFloat16, float16ToFloat32 
 import { f16Mode, defaultDtype, createLossScaler } from './f16mode.js'
 import { cast } from './ops/cast.js'
 import { transformWeights as winogradTransformWeights, canUseWinograd } from './ops/conv2d_winograd.js'
+import { shouldUseIm2col } from './ops/conv2d_im2col.js'
 import { poolOutputSize } from './ops/pool2d.js'
 import {
   parseSafetensors, readTensor, listTensors,
@@ -142,7 +143,7 @@ const smith = {
   // Conv / Pool / BatchNorm / Winograd
   conv2d, maxPool2d, avgPool2d, batchnorm,
   createBatchNorm, convOutputSize, poolOutputSize,
-  winogradTransformWeights, canUseWinograd,
+  winogradTransformWeights, canUseWinograd, shouldUseIm2col,
 
   // RoPE / RMSNorm / SwiGLU
   rope, rmsNorm, swiglu, precomputeRoPE,
@@ -181,6 +182,6 @@ export {
   matmulQ8,
   conv2d, maxPool2d, avgPool2d, batchnorm,
   createBatchNorm, convOutputSize, poolOutputSize,
-  winogradTransformWeights, canUseWinograd,
+  winogradTransformWeights, canUseWinograd, shouldUseIm2col,
   rope, rmsNorm, swiglu, precomputeRoPE,
 }

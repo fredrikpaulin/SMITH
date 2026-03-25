@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.14.0 — Phase 14: im2col Convolution Path (2026-03-25)
+
+### Added
+
+- **im2col Metal shaders** (`shaders/im2col.metal`) — `im2col_forward` rearranges input patches into column matrix `[batch, inC*kH*kW, outH*outW]` for GEMM-based convolution. `col2im_backward` scatter-adds columns back to input gradient layout. Supports arbitrary kernel sizes, strides, padding, and dilation.
+- **JS dispatch** (`src/ops/conv2d_im2col.js`) — `im2col` and `col2im` GPU dispatch. `im2colForward` performs im2col + per-batch GEMM via existing `matmul2d`. `im2colBackwardInput` via weight^T @ grad + col2im. `im2colBackwardWeight` via grad @ cols^T + accumulate. `shouldUseIm2col` selects this path for non-3×3 kernels or strided/dilated 3×3.
+- **3-way auto-dispatch** — `conv2d()` in autograd now selects: Winograd (3×3, stride 1, dilation 1) > im2col (larger kernels, strided 3×3) > direct (1×1 pointwise fallback). No code changes needed.
+- **Tests** (`tests/im2col.test.js`) — `shouldUseIm2col` selection logic, im2col shape/size verification, forward equivalence vs direct conv (5×5, 7×7 stride 2, batched, no bias, CPU reference), auto-dispatch for 5×5 and 3×3-stride-2, backward gradient finiteness, numerical gradient checks (input and weight), autograd pipeline.
+
 ## 0.13.0 — Phase 13: Winograd Convolution (2026-03-25)
 
 ### Added
