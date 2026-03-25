@@ -221,3 +221,45 @@ const config = smith.extractGGUFConfig(parsed.metadata)
 | `extractGGUFConfig(metadata)` | Extract model config (arch, dim, layers, heads, RoPE, etc.) |
 
 Supported architectures: `llama` (Llama 2/3, Mistral, CodeLlama, TinyLlama), `phi`/`phi2`/`phi3`, `gpt2`.
+
+## Convolutions
+
+NCHW-layout 2D convolution, pooling, and batch normalization for building CNNs.
+
+```js
+import smith from './src/index.js'
+
+// Conv2d — autograd-aware
+const input = smith.variable(smith.rand([1, 3, 32, 32]), { requiresGrad: true })
+const weight = smith.variable(smith.rand([16, 3, 3, 3]), { requiresGrad: true })
+const bias = smith.variable(smith.zeros([16]), { requiresGrad: true })
+const conv = smith.conv2d(input, weight, bias, { padding: 1 })
+
+// Pooling
+const pooled = smith.maxPool2d(conv, { kernelSize: 2 })
+const avgPooled = smith.avgPool2d(conv, { kernelSize: 2, stride: 2 })
+
+// Batch normalization
+const bn = smith.createBatchNorm(16)
+const normed = smith.batchnorm(conv, bn, true) // true = training
+
+// Backward
+const loss = smith.sum(pooled)
+smith.backward(loss)
+```
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `conv2d` | `(input, weight, bias, opts?)` | 2D convolution on Variables |
+| `maxPool2d` | `(input, opts?)` | Max pooling with gradient support |
+| `avgPool2d` | `(input, opts?)` | Average pooling with gradient support |
+| `batchnorm` | `(input, layer, training?)` | Batch normalization |
+| `createBatchNorm` | `(channels, opts?)` | Create BN layer state (gamma, beta, running stats) |
+| `convOutputSize` | `(inSize, kSize, stride, pad, dilation)` | Compute conv output dimension |
+| `poolOutputSize` | `(inSize, kSize, stride, pad)` | Compute pool output dimension |
+
+Conv2d options: `{ stride, padding, dilation, groups }` — each accepts scalar or `[H, W]` array.
+
+Pool options: `{ kernelSize, stride, padding }` — each accepts scalar or `[H, W]` array. Stride defaults to kernelSize.
+
+BatchNorm options: `{ eps, momentum }` — defaults: `1e-5`, `0.1`.

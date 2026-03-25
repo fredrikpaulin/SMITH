@@ -18,6 +18,7 @@ import { poolStats, poolDrain } from './pool.js'
 import { dtypeBytes, toFloat16, fromFloat16, float32ToFloat16, float16ToFloat32 } from './dtype.js'
 import { f16Mode, defaultDtype, createLossScaler } from './f16mode.js'
 import { cast } from './ops/cast.js'
+import { poolOutputSize } from './ops/pool2d.js'
 import {
   parseSafetensors, readTensor, listTensors,
   loadSafetensors, loadGPT2Safetensors,
@@ -36,6 +37,8 @@ const {
   flashAttention,
   sum, reshape, transpose,
   embedding, addGrad,
+  conv2d, maxPool2d, avgPool2d, batchnorm,
+  createBatchNorm, convOutputSize,
 } = autograd
 
 // Re-export optimizer
@@ -133,6 +136,10 @@ const smith = {
   // Mixed precision
   f16Mode, defaultDtype, cast, createLossScaler,
 
+  // Conv / Pool / BatchNorm
+  conv2d, maxPool2d, avgPool2d, batchnorm,
+  createBatchNorm, convOutputSize, poolOutputSize,
+
   // GGUF
   loadGGUF, parseGGUF, listGGUFTensors, extractGGUFConfig,
 }
@@ -167,4 +174,6 @@ export {
   f16Mode, defaultDtype, cast, createLossScaler,
   loadGGUF, parseGGUF, listGGUFTensors, extractGGUFConfig,
   matmulQ8,
+  conv2d, maxPool2d, avgPool2d, batchnorm,
+  createBatchNorm, convOutputSize, poolOutputSize,
 }

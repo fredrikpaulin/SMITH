@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.10.0 — Phase 10: Convolutions (2026-03-25)
+
+### Added
+
+- **Conv2d** (`shaders/conv2d.metal`, `src/ops/conv2d.js`) — 2D convolution with groups, dilation, stride, padding support. Forward kernel dispatches one thread per output element. Separate backward kernels for input gradient (transposed convolution), weight gradient (accumulation over batch and spatial), and bias gradient (channel-wise sum). NCHW layout throughout.
+- **Pool2d** (`shaders/pool2d.metal`, `src/ops/pool2d.js`) — Max pooling with argmax index tracking for backward pass. Average pooling with count-based divisor for padded regions. Forward and backward for both. Backward avg pool uses one thread per input element, iterating output positions.
+- **Batch normalization** (`shaders/batchnorm.metal`, `src/ops/batchnorm.js`) — Training mode computes batch mean/variance per channel, normalizes, updates running stats. Inference mode uses running stats. Backward computes gradInput, gradGamma, gradBeta in a single kernel.
+- **Autograd integration** (`src/autograd.js`) — `conv2d()`, `maxPool2d()`, `avgPool2d()`, `batchnorm()` as autograd-aware ops with backward closures. Batchnorm supports training and inference modes.
+- **Helper exports** — `createBatchNorm()`, `convOutputSize()`, `poolOutputSize()` for building CNN architectures.
+- **Tests** (`tests/conv.test.js`) — CPU reference implementations for conv2d, maxpool2d, avgpool2d. Forward correctness, backward shape verification, gradient scatter checks, numerical gradient verification, autograd pipeline (conv→relu→pool), batchnorm normalization and running stats.
+
 ## 0.9.0 — Phase 9: GGUF Import (2026-03-25)
 
 ### Added

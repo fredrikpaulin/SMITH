@@ -17,6 +17,9 @@ import { layernormForward as gpuLayernormFwd, layernormBackward as gpuLayernormB
 import { transpose as gpuTranspose, inverseAxes } from './ops/transpose.js'
 import { reshape as gpuReshape } from './ops/reshape.js'
 import { flashAttentionForward as gpuFlashFwd, flashAttentionBackward as gpuFlashBwd } from './ops/flash_attention.js'
+import { conv2dForward as gpuConv2dFwd, conv2dBackwardInput as gpuConv2dBwdInput, conv2dBackwardWeight as gpuConv2dBwdWeight, conv2dBackwardBias as gpuConv2dBwdBias, convOutputSize } from './ops/conv2d.js'
+import { maxPool2dForward as gpuMaxPool2dFwd, maxPool2dBackward as gpuMaxPool2dBwd, avgPool2dForward as gpuAvgPool2dFwd, avgPool2dBackward as gpuAvgPool2dBwd } from './ops/pool2d.js'
+import { batchnormForward as gpuBnFwd, batchnormInference as gpuBnInfer, batchnormBackward as gpuBnBwd, createBatchNorm } from './ops/batchnorm.js'
 
 let _noGrad = false
 
@@ -359,6 +362,68 @@ function crossEntropy(logits, targets) {
   })
 }
 
+// --- Conv2d ---
+
+function conv2d(input, weight, bias, opts = {}) {
+  const outData = gpuConv2dFwd(input.data, weight.data, bias ? bias.data : null, opts)
+  return variable(outData, {
+    _deps: bias ? [input, weight, bias] : [input, weight],
+    _backward: _noGrad ? null : (grad) => {
+      addGrad(input, gpuConv2dBwdInput(grad, weight.data, input.data.shape, opts))
+      addGrad(weight, gpuConv2dBwdWeight(input.data, grad, weight.data.shape, opts))
+      if (bias) addGrad(bias, gpuConv2dBwdBias(grad))
+    },
+  })
+}
+
+// --- Max Pool 2d ---
+
+function maxPool2d(input, opts = {}) {
+  const { out, indices } = gpuMaxPool2dFwd(input.data, opts)
+  return variable(out, {
+    _deps: [input],
+    _backward: _noGrad ? null : (grad) => {
+      addGrad(input, gpuMaxPool2dBwd(grad, indices, input.data.shape))
+    },
+  })
+}
+
+// --- Avg Pool 2d ---
+
+function avgPool2d(input, opts = {}) {
+  const outData = gpuAvgPool2dFwd(input.data, opts)
+  return variable(outData, {
+    _deps: [input],
+    _backward: _noGrad ? null : (grad) => {
+      addGrad(input, gpuAvgPool2dBwd(grad, input.data.shape, opts))
+    },
+  })
+}
+
+// --- Batch Normalization ---
+
+function batchnorm(input, layer, training = true) {
+  if (!training) {
+    return variable(gpuBnInfer(input.data, layer), {
+      _deps: [input],
+      _backward: null,
+    })
+  }
+  const { out, savedMean, savedInvStd } = gpuBnFwd(input.data, layer)
+  return variable(out, {
+    _deps: [input],
+    _backward: _noGrad ? null : (grad) => {
+      const { gradInput, gradGamma, gradBeta } = gpuBnBwd(grad, input.data, savedMean, savedInvStd, layer)
+      addGrad(input, gradInput)
+      // Accumulate gamma/beta gradients directly (they're plain tensors in layer, not Variables)
+      if (!layer.gamma.grad) layer.gamma.grad = gradGamma
+      else layer.gamma.grad = gpuAdd(layer.gamma.grad, gradGamma)
+      if (!layer.beta.grad) layer.beta.grad = gradBeta
+      else layer.beta.grad = gpuAdd(layer.beta.grad, gradBeta)
+    },
+  })
+}
+
 export {
   variable, param,
   backward, zeroGrad, noGrad,
@@ -370,4 +435,6 @@ export {
   transposeVar as transpose,
   embedding,
   addGrad,
+  conv2d, maxPool2d, avgPool2d, batchnorm,
+  createBatchNorm, convOutputSize,
 }
