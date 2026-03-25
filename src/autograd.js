@@ -20,6 +20,9 @@ import { flashAttentionForward as gpuFlashFwd, flashAttentionBackward as gpuFlas
 import { conv2dForward as gpuConv2dFwd, conv2dBackwardInput as gpuConv2dBwdInput, conv2dBackwardWeight as gpuConv2dBwdWeight, conv2dBackwardBias as gpuConv2dBwdBias, convOutputSize } from './ops/conv2d.js'
 import { maxPool2dForward as gpuMaxPool2dFwd, maxPool2dBackward as gpuMaxPool2dBwd, avgPool2dForward as gpuAvgPool2dFwd, avgPool2dBackward as gpuAvgPool2dBwd } from './ops/pool2d.js'
 import { batchnormForward as gpuBnFwd, batchnormInference as gpuBnInfer, batchnormBackward as gpuBnBwd, createBatchNorm } from './ops/batchnorm.js'
+import { ropeForward as gpuRopeFwd, ropeBackward as gpuRopeBwd, precomputeRoPE } from './ops/rope.js'
+import { rmsnormForward as gpuRmsnormFwd, rmsnormBackward as gpuRmsnormBwd } from './ops/rmsnorm.js'
+import { swigluForward as gpuSwigluFwd, swigluBackward as gpuSwigluBwd } from './ops/swiglu.js'
 
 let _noGrad = false
 
@@ -424,6 +427,47 @@ function batchnorm(input, layer, training = true) {
   })
 }
 
+// --- RoPE ---
+
+function rope(a, ropeTable, startPos = 0) {
+  const outData = gpuRopeFwd(a.data, ropeTable, startPos)
+  return variable(outData, {
+    _deps: [a],
+    _backward: _noGrad ? null : (grad) => {
+      addGrad(a, gpuRopeBwd(grad, ropeTable, startPos))
+    },
+  })
+}
+
+// --- RMSNorm ---
+
+function rmsNorm(a, gamma, eps = 1e-5) {
+  const outData = gpuRmsnormFwd(a.data, gamma.data, eps)
+  return variable(outData, {
+    _deps: [a, gamma],
+    _backward: _noGrad ? null : (grad) => {
+      const { gradInput, gradGamma } = gpuRmsnormBwd(grad, a.data, gamma.data, eps)
+      addGrad(a, gradInput)
+      addGrad(gamma, gradGamma)
+    },
+  })
+}
+
+// --- SwiGLU ---
+// Fused silu(gate) * up — gate and up are Variables
+
+function swiglu(gate, up) {
+  const outData = gpuSwigluFwd(gate.data, up.data)
+  return variable(outData, {
+    _deps: [gate, up],
+    _backward: _noGrad ? null : (grad) => {
+      const { gradGate, gradUp } = gpuSwigluBwd(grad, gate.data, up.data)
+      addGrad(gate, gradGate)
+      addGrad(up, gradUp)
+    },
+  })
+}
+
 export {
   variable, param,
   backward, zeroGrad, noGrad,
@@ -437,4 +481,5 @@ export {
   addGrad,
   conv2d, maxPool2d, avgPool2d, batchnorm,
   createBatchNorm, convOutputSize,
+  rope, rmsNorm, swiglu, precomputeRoPE,
 }

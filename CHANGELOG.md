@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.11.0 — Phase 11: GPU RoPE, RMSNorm, SwiGLU (2026-03-25)
+
+### Added
+
+- **RoPE Metal shader** (`shaders/rope.metal`) — GPU-accelerated Rotary Position Embeddings. One thread per (position, frequency-pair) with configurable `startPos` offset for KV cache compatibility. Forward and backward kernels. Cos/sin tables stay f32 for precision even with f16 input. f16 variant included.
+- **RMSNorm Metal shader** (`shaders/rmsnorm.metal`) — Llama-style RMS normalization on GPU. One threadgroup per row with parallel reduction for sum-of-squares. f32 accumulator for reduction in both f32 and f16 variants. Forward and backward kernels (backward computes `gradInput` on GPU, `gradGamma` via CPU accumulation).
+- **SwiGLU Metal shader** (`shaders/swiglu.metal`) — Fused `silu(gate) * up` in a single elementwise kernel, eliminating one intermediate buffer vs separate SiLU + multiply. Forward and backward with analytic SiLU derivative. f16 variant included.
+- **JS dispatch files** (`src/ops/rope.js`, `src/ops/rmsnorm.js`, `src/ops/swiglu.js`) — GPU dispatch with dtype-aware kernel selection via `k()`. `precomputeRoPE(dim, maxSeqLen, freqBase)` builds cos/sin frequency tables.
+- **Autograd integration** (`src/autograd.js`) — `rope()`, `rmsNorm()`, `swiglu()` as autograd-aware ops with backward closures. `precomputeRoPE` re-exported.
+- **GGUF loader updated** (`src/gguf_loader.js`) — `applyRoPE`, `rmsNorm`, and `swiGLUForward` now dispatch to GPU shaders instead of CPU loops. `precomputeRoPE` imported from `ops/rope.js`.
+- **Tests** (`tests/gpu_ops.test.js`) — CPU reference implementations for all three ops. Forward correctness, position offset, identity at pos-0, backward inversion (RoPE), numerical gradient checks (RMSNorm, SwiGLU gate/up), autograd pipeline test (rmsNorm → matmul → swiglu → matmul with full backward).
+
 ## 0.10.0 — Phase 10: Convolutions (2026-03-25)
 
 ### Added

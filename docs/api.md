@@ -263,3 +263,37 @@ Conv2d options: `{ stride, padding, dilation, groups }` — each accepts scalar 
 Pool options: `{ kernelSize, stride, padding }` — each accepts scalar or `[H, W]` array. Stride defaults to kernelSize.
 
 BatchNorm options: `{ eps, momentum }` — defaults: `1e-5`, `0.1`.
+
+## RoPE, RMSNorm, SwiGLU
+
+GPU-accelerated Llama-style operations. Used internally by the GGUF loader and available as standalone autograd ops for custom architectures.
+
+```js
+import smith from './src/index.js'
+
+// RoPE: precompute frequency tables, then apply
+const table = smith.precomputeRoPE(64, 2048, 10000)  // dim, maxSeqLen, freqBase
+const q = smith.variable(smith.rand([16, 64]), { requiresGrad: true })
+const rotated = smith.rope(q, table, 0)  // startPos for KV cache
+
+// RMSNorm: Llama-style normalization (no mean subtraction, no beta)
+const x = smith.variable(smith.rand([16, 256]), { requiresGrad: true })
+const gamma = smith.variable(smith.ones([256]), { requiresGrad: true })
+const normed = smith.rmsNorm(x, gamma, 1e-5)
+
+// SwiGLU: fused silu(gate) * up
+const gate = smith.variable(smith.rand([16, 512]), { requiresGrad: true })
+const up = smith.variable(smith.rand([16, 512]), { requiresGrad: true })
+const activated = smith.swiglu(gate, up)
+
+// All support backward
+const loss = smith.sum(activated)
+smith.backward(loss)
+```
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `precomputeRoPE` | `(dim, maxSeqLen, freqBase?)` | Build cos/sin frequency tables (always f32) |
+| `rope` | `(input, ropeTable, startPos?)` | Apply rotary position embeddings (autograd) |
+| `rmsNorm` | `(input, gamma, eps?)` | RMS normalization (autograd) |
+| `swiglu` | `(gate, up)` | Fused SiLU(gate) × up (autograd) |

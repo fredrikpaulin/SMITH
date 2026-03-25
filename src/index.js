@@ -39,6 +39,7 @@ const {
   embedding, addGrad,
   conv2d, maxPool2d, avgPool2d, batchnorm,
   createBatchNorm, convOutputSize,
+  rope, rmsNorm, swiglu, precomputeRoPE,
 } = autograd
 
 // Re-export optimizer
@@ -140,6 +141,9 @@ const smith = {
   conv2d, maxPool2d, avgPool2d, batchnorm,
   createBatchNorm, convOutputSize, poolOutputSize,
 
+  // RoPE / RMSNorm / SwiGLU
+  rope, rmsNorm, swiglu, precomputeRoPE,
+
   // GGUF
   loadGGUF, parseGGUF, listGGUFTensors, extractGGUFConfig,
 }
@@ -176,4 +180,5 @@ export {
   matmulQ8,
   conv2d, maxPool2d, avgPool2d, batchnorm,
   createBatchNorm, convOutputSize, poolOutputSize,
+  rope, rmsNorm, swiglu, precomputeRoPE,
 }

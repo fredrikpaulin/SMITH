@@ -6,6 +6,9 @@
 import * as T from './tensor.js'
 import * as A from './autograd.js'
 import * as device from './device.js'
+import { ropeForward as gpuRopeFwd, precomputeRoPE as gpuPrecomputeRoPE } from './ops/rope.js'
+import { rmsnormForward as gpuRmsnormFwd } from './ops/rmsnorm.js'
+import { swigluForward as gpuSwigluFwd } from './ops/swiglu.js'
 import {
   createLinear, linear, linearParams,
   createTransformerBlock, blockParams,
@@ -102,98 +105,39 @@ function resolveWeight(name, weightMap) {
 // --- RoPE precomputation ---
 // Llama-style rotary position embeddings: precompute cos/sin tables
 
-function precomputeRoPE(dim, maxSeqLen, freqBase = 10000) {
-  const halfDim = dim / 2
-  const freqs = new Float32Array(halfDim)
-  for (let i = 0; i < halfDim; i++) {
-    freqs[i] = 1.0 / Math.pow(freqBase, (2 * i) / dim)
-  }
-
-  const cos = new Float32Array(maxSeqLen * halfDim)
-  const sin = new Float32Array(maxSeqLen * halfDim)
-  for (let pos = 0; pos < maxSeqLen; pos++) {
-    for (let i = 0; i < halfDim; i++) {
-      const angle = pos * freqs[i]
-      cos[pos * halfDim + i] = Math.cos(angle)
-      sin[pos * halfDim + i] = Math.sin(angle)
-    }
-  }
-
-  return {
-    cos: T.tensor(Array.from(cos), [maxSeqLen, halfDim]),
-    sin: T.tensor(Array.from(sin), [maxSeqLen, halfDim]),
-  }
-}
+// precomputeRoPE is now imported from ops/rope.js
+const precomputeRoPE = gpuPrecomputeRoPE
 
 // Apply RoPE to Q or K tensor: [seqLen, dim] → [seqLen, dim]
-// Rotates pairs: (x0, x1) → (x0*cos - x1*sin, x0*sin + x1*cos)
+// GPU-accelerated via rope.metal
 function applyRoPE(x, ropeTable, startPos = 0) {
   const xData = T.contiguous(x.data)
-  const seqLen = xData.shape[0]
-  const dim = xData.shape[1]
-  const halfDim = dim / 2
-
-  const out = T.create(xData.shape, xData.dtype)
-  for (let s = 0; s < seqLen; s++) {
-    const pos = startPos + s
-    for (let i = 0; i < halfDim; i++) {
-      const x0 = xData.data[s * dim + i]
-      const x1 = xData.data[s * dim + halfDim + i]
-      const c = ropeTable.cos.data[pos * halfDim + i]
-      const sn = ropeTable.sin.data[pos * halfDim + i]
-      out.data[s * dim + i] = x0 * c - x1 * sn
-      out.data[s * dim + halfDim + i] = x0 * sn + x1 * c
-    }
-  }
-
+  const out = gpuRopeFwd(xData, ropeTable, startPos)
   return A.variable(out, { requiresGrad: false })
 }
 
 // --- SwiGLU FFN (Llama-style) ---
 // out = down(silu(gate(x)) * up(x))
-// Unlike GPT-2's MLP: gelu(fc1(x)) → fc2
+// GPU-accelerated: linear projections + fused silu*up via swiglu.metal
 
 function swiGLUForward(x, gate, up, down) {
   const gateOut = linear(x, gate)    // [seqLen, ffnDim]
   const upOut = linear(x, up)        // [seqLen, ffnDim]
-  // SiLU activation on gate path
-  // silu(x) = x * sigmoid(x), we'll use autograd ops
-  // For now compute on CPU (activations are small relative to matmul)
+  // Fused SiLU(gate) * up on GPU
   const gateData = T.contiguous(gateOut.data)
-  const activated = T.create(gateData.shape, gateData.dtype)
-  for (let i = 0; i < gateData.size; i++) {
-    const v = gateData.data[i]
-    activated.data[i] = v / (1 + Math.exp(-v)) // silu
-  }
-  const activatedVar = A.variable(activated, { requiresGrad: false })
-  const gated = A.mul(activatedVar, upOut)
-  return linear(gated, down)
+  const upData = T.contiguous(upOut.data)
+  const fused = gpuSwigluFwd(gateData, upData)
+  const fusedVar = A.variable(fused, { requiresGrad: false })
+  return linear(fusedVar, down)
 }
 
 // --- RMSNorm (Llama-style) ---
-// RMSNorm(x) = x * gamma / sqrt(mean(x²) + eps)
+// GPU-accelerated via rmsnorm.metal
 
 function rmsNorm(x, gamma, eps = 1e-5) {
   const xData = T.contiguous(x.data)
-  const shape = xData.shape
-  const rows = shape.length > 1 ? shape[0] : 1
-  const cols = shape[shape.length - 1]
-
-  const out = T.create(shape, xData.dtype)
   const gammaData = T.contiguous(gamma.data)
-
-  for (let r = 0; r < rows; r++) {
-    let sumSq = 0
-    for (let c = 0; c < cols; c++) {
-      const v = xData.data[r * cols + c]
-      sumSq += v * v
-    }
-    const rms = Math.sqrt(sumSq / cols + eps)
-    for (let c = 0; c < cols; c++) {
-      out.data[r * cols + c] = xData.data[r * cols + c] * gammaData.data[c] / rms
-    }
-  }
-
+  const out = gpuRmsnormFwd(xData, gammaData, eps)
   return A.variable(out, { requiresGrad: false })
 }
 
