@@ -184,9 +184,8 @@ function forward(model, tokens, targets = null) {
   const ropeQ = tileRoPETable(ropeBase, T, nHead)
   const ropeK = tileRoPETable(ropeBase, T, nKVHead)
 
-  // Token embedding + RMSNorm
+  // Token embedding
   let x = embedding(tokens, model.wte)
-  x = rmsNorm(x, variable(ones([nEmbd]), { requiresGrad: false }))
   const x0 = x
 
   for (let i = 0; i < blocks.length; i++) {
