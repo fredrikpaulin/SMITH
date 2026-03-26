@@ -256,10 +256,8 @@ function forward(model, tokens, targets = null) {
   // Final norm
   x = rmsNorm(x, model.normF)
 
-  // LM head + soft-capping
-  let logits = matmul(x, model.lmHead)  // [T, vocabSize]
-  const softcap = 15
-  logits = scale(tanh(scale(logits, 1.0 / softcap)), softcap)
+  // LM head
+  const logits = matmul(x, model.lmHead)  // [T, vocabSize]
 
   if (targets !== null) {
     const loss = crossEntropy(logits, targets)
