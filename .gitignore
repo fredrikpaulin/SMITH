@@ -11,3 +11,6 @@ ARCHITECTURE.md
 models/*
 !models/registry.json
 !models/registry.schema.json
+examples/autoresearch/data/
+examples/autoresearch/results/
+**/_test_results/

@@ -40,4 +40,12 @@ echo "  Model: model.js (modifiable)"
 echo "  Train: train.js (modifiable)"
 echo ""
 
-claude "start autoresearch"
+# --allowedTools lets the agent run without permission prompts.
+# Scoped to:
+#   Bash(bun*)     — run training and research.js
+#   Bash(git*)     — commit, revert, branch
+#   Bash(grep*)    — parse logs
+#   Bash(cat*)     — read files
+#   Edit, Read     — modify model.js / train.js
+claude --allowedTools "Bash(bun*),Bash(git*),Bash(grep*),Bash(cat*),Bash(tail*),Bash(head*),Edit,Read" \
+  "start autoresearch"
