@@ -73,7 +73,7 @@ function createModel(config = {}) {
   const { vocabSize, nEmbd, nLayer, nHead, nKVHead, seqLen } = cfg
   const headDim = Math.floor(nEmbd / nHead)
   const kvDim = nKVHead * headDim
-  const ffnDim = 4 * nEmbd
+  const ffnDim = Math.floor(8 * nEmbd / 3)
   const veGateChannels = Math.min(32, nEmbd)
 
   // Embedding
@@ -92,8 +92,9 @@ function createModel(config = {}) {
       cK: param([nEmbd, kvDim]),
       cV: param([nEmbd, kvDim]),
       cProj: param([nHead * headDim, nEmbd]),
-      // MLP
-      cFc: param([nEmbd, ffnDim]),
+      // MLP (SwiGLU)
+      cFcUp: param([nEmbd, ffnDim]),
+      cFcGate: param([nEmbd, ffnDim]),
       cMlpProj: param([ffnDim, nEmbd]),
       // RMSNorm gammas
       normAttn: variable(ones([nEmbd]), { requiresGrad: true }),
@@ -151,7 +152,8 @@ function initWeights(model) {
     // Proj: zeros
     block.cProj.data.data.fill(0)
     // MLP fc: uniform, proj: zeros
-    uniformInit(block.cFc.data.data, s)
+    uniformInit(block.cFcUp.data.data, s)
+    uniformInit(block.cFcGate.data.data, s)
     block.cMlpProj.data.data.fill(0)
     // Norm gammas: ones (already set by T.ones)
     // VE
@@ -245,10 +247,11 @@ function forward(model, tokens, targets = null) {
     const attnProj = matmul(attnOut, block.cProj)
     x = add(x, attnProj)
 
-    // --- MLP ---
+    // --- MLP (SwiGLU) ---
     const xMlpNorm = rmsNorm(x, block.normMlp)
-    let h = matmul(xMlpNorm, block.cFc)
-    h = smith.gelu(h)
+    const up = matmul(xMlpNorm, block.cFcUp)
+    const gate = matmul(xMlpNorm, block.cFcGate)
+    const h = smith.swiglu(up, gate)
     const mlpOut = matmul(h, block.cMlpProj)
     x = add(x, mlpOut)
   }
@@ -344,7 +347,7 @@ function getParamGroups(model) {
 
   for (const block of blocks) {
     matrixParams.push(block.cQ, block.cK, block.cV, block.cProj)
-    matrixParams.push(block.cFc, block.cMlpProj)
+    matrixParams.push(block.cFcUp, block.cFcGate, block.cMlpProj)
     if (block.veGate) matrixParams.push(block.veGate)
     if (block.veEmbed) veParams.push(block.veEmbed)
   }
