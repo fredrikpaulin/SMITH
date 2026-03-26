@@ -249,7 +249,7 @@ function forward(model, tokens, targets = null) {
     // --- MLP ---
     const xMlpNorm = rmsNorm(x, block.normMlp)
     let h = matmul(xMlpNorm, block.cFc)
-    h = reluSquared(h)
+    h = smith.gelu(h)
     const mlpOut = matmul(h, block.cMlpProj)
     x = add(x, mlpOut)
   }
