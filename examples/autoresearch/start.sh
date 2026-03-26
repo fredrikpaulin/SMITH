@@ -21,9 +21,10 @@ if [ ! -f "$SMITH_ROOT/native/libsmith.dylib" ]; then
   exit 1
 fi
 
-# Prepare data if missing
-if [ ! -f "$DIR/data/train.bin" ]; then
+# Prepare data if missing or incomplete
+if [ ! -f "$DIR/data/train.bin" ] || [ ! -f "$DIR/data/val.bin" ] || [ ! -f "$DIR/data/tokenizer.json" ]; then
   echo "Preparing data (downloading texts, training tokenizer)..."
+  rm -rf "$DIR/data"
   bun "$DIR/prepare.js" --out "$DIR/data" --vocab 4096
   echo ""
 fi
@@ -48,4 +49,4 @@ echo ""
 #   Bash(cat*)     — read files
 #   Edit, Read     — modify model.js / train.js
 claude --allowedTools "Bash(bun*),Bash(git*),Bash(grep*),Bash(cat*),Bash(tail*),Bash(head*),Edit,Read" \
-  "start autoresearch"
+  -p "start autoresearch"
