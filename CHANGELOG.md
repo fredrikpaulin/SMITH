@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.29.0 — Autoresearch Example (2026-03-26)
+
+### Added
+
+- **`examples/autoresearch/model.js`** — GPT model ported from Karpathy's autoresearch. Uses Smith's autograd throughout: RoPE, RMSNorm, GQA flash attention with sliding windows, ReluSquared MLP, value embeddings (ResFormer) with sigmoid-gated residual, logit soft-capping via tanh. 3D reshape for flash attention (`[T, nHead*headDim]` → `[nHead, T, headDim]`) with tiled RoPE tables to apply per-head rotations through the 2D rope kernel. Includes `createModel()`, `initWeights()`, `forward()`, `setupOptimizer()` with reference parameter grouping (matrix→Muon, embeddings/scalars→AdamW).
+- **`examples/autoresearch/data.js`** — Data loading utilities. Binary uint16 token format, sequential data loader with wraparound, BPB (bits per byte) evaluation metric, and tokenizer training via Smith's built-in BPE.
+- **`examples/autoresearch/prepare.js`** — Data preparation CLI. Downloads public domain texts from Project Gutenberg, trains BPE tokenizer, saves tokenized train/val splits.
+- **`examples/autoresearch/train.js`** — Training loop with LR warmup/warmdown schedule, Muon momentum ramp, time-budgeted training, gradient accumulation across sequences, and final BPB evaluation.
+- **Tests** — Model tests (creation, init, forward shape, loss, backward gradients, optimizer step, loss reduction, VE placement, soft-capping bounds, window pattern). Data tests (loader shapes, advancement, wraparound, reset, BPB computation, special token handling).
+
 ## 0.28.0 — MuonAdamW Optimizer (2026-03-26)
 
 ### Added
