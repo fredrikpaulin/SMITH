@@ -48,5 +48,4 @@ echo ""
 #   Bash(grep*)    — parse logs
 #   Bash(cat*)     — read files
 #   Edit, Read     — modify model.js / train.js
-claude --allowedTools "Bash(bun*),Bash(git*),Bash(grep*),Bash(cat*),Bash(tail*),Bash(head*),Edit,Read" \
-"start autoresearch"
+claude "start autoresearch" --allowedTools "Bash(bun*),Bash(git*),Bash(grep*),Bash(cat*),Bash(tail*),Bash(head*),Edit,Read"
