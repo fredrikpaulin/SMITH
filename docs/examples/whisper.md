@@ -9,7 +9,6 @@ This document covers setup, usage, architecture, the module API for each compone
 - macOS with Apple Silicon (M1–M5)
 - Bun runtime
 - Smith built (`bash build.sh`)
-- A whisper.cpp GGML model file (see Models below)
 
 ## Quick Start
 
@@ -17,12 +16,16 @@ This document covers setup, usage, architecture, the module API for each compone
 # Build Smith
 cd /path/to/smith && bash build.sh
 
-# Download a model
-curl -L -o ggml-tiny.bin \
-  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin
+# Transcribe (auto-downloads whisper-tiny on first run)
+bun examples/whisper/cli.js --model whisper-tiny --file recording.wav
+```
 
-# Transcribe
-bun examples/whisper/cli.js --model ggml-tiny.bin --file recording.wav
+The model is fetched from Hugging Face and cached in `models/whisper-tiny/` automatically.
+
+You can also pass a direct file path:
+
+```bash
+bun examples/whisper/cli.js --model path/to/ggml-tiny.bin --file recording.wav
 ```
 
 ## CLI Reference
@@ -33,7 +36,7 @@ bun examples/whisper/cli.js [options]
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `-m, --model <path>` | Path to GGML model file (.bin) | required |
+| `-m, --model <id\|path>` | Registry ID or path to GGML model file | required |
 | `-f, --file <path>` | Path to WAV audio file | required |
 | `-l, --language <code>` | Language code (e.g. `en`, `de`, `fr`) | `en` |
 | `--max-tokens <n>` | Maximum tokens to generate | `224` |
@@ -41,20 +44,22 @@ bun examples/whisper/cli.js [options]
 | `-o, --output <path>` | Write output to file instead of stdout | — |
 | `--format <fmt>` | Output format: `text`, `json`, `srt`, `vtt` | `text` |
 | `-v, --verbose` | Show model info and timing breakdown | `false` |
+| `--list-models` | List available models from registry | — |
 
 The `json` format includes the raw token IDs, language, audio duration, and (with `--verbose`) per-stage timing. The `srt` and `vtt` formats produce a single subtitle segment spanning the full audio duration — word-level timestamps are not yet supported.
 
 ## Models
 
-Download whisper.cpp GGML models from [huggingface.co/ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp). These are `.bin` files using the GGML binary format (not GGUF).
+Models are managed through Smith's model registry. Pass a registry ID to `--model` and it auto-downloads from [huggingface.co/ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp) on first use. Use `--list-models` to see available models.
 
-| Model | File | Size | Notes |
-|-------|------|------|-------|
-| Tiny | `ggml-tiny.bin` | 75 MB | Fastest, good for clear audio |
-| Base | `ggml-base.bin` | 142 MB | Better accuracy, multilingual |
-| Base (EN) | `ggml-base.en.bin` | 142 MB | English-only, slightly better on English |
-| Small | `ggml-small.bin` | 466 MB | High quality, 99 languages |
-| Medium | `ggml-medium.bin` | 1.5 GB | Very high quality |
+| Registry ID | Size | Notes |
+|-------------|------|-------|
+| `whisper-tiny` | 75 MB | Fastest, good for clear audio |
+| `whisper-tiny-en` | 75 MB | English only |
+| `whisper-base` | 142 MB | Better accuracy, multilingual |
+| `whisper-base-en` | 142 MB | English-only, slightly better on English |
+| `whisper-small` | 466 MB | High quality, 99 languages |
+| `whisper-medium` | 1.5 GB | Very high quality |
 
 The loader supports F32, F16, and Q8_0 weight types. All models are dequantized to f32 at load time.
 

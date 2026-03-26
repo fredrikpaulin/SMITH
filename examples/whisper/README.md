@@ -10,17 +10,22 @@ Zero dependencies beyond Smith and Bun.
 # 1. Build Smith (if not already done)
 cd /path/to/smith && bash build.sh
 
-# 2. Download a Whisper model
-curl -L -o ggml-tiny.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin
+# 2. Transcribe (auto-downloads whisper-tiny from HF on first run)
+bun examples/whisper/cli.js --model whisper-tiny --file recording.wav
+```
 
-# 3. Transcribe
-bun examples/whisper/cli.js --model ggml-tiny.bin --file recording.wav
+The model is fetched from Hugging Face and cached in `models/whisper-tiny/` automatically. Subsequent runs use the cached copy.
+
+You can also pass a direct file path:
+
+```bash
+bun examples/whisper/cli.js --model path/to/ggml-tiny.bin --file recording.wav
 ```
 
 ## CLI Options
 
 ```
--m, --model <path>       Path to whisper.cpp GGML model (.bin)
+-m, --model <id|path>    Model registry ID or path to GGML file (.bin)
 -f, --file <path>        Path to audio file (.wav, 16-bit PCM)
 -l, --language <code>    Language code (default: en)
 --max-tokens <n>         Maximum tokens to generate (default: 224)
@@ -28,6 +33,7 @@ bun examples/whisper/cli.js --model ggml-tiny.bin --file recording.wav
 -o, --output <path>      Write output to file
 --format <fmt>           Output format: text, json, srt, vtt (default: text)
 -v, --verbose            Show timing and model info
+--list-models            List available models from registry
 ```
 
 ## Architecture
@@ -57,14 +63,22 @@ Conv1d in the encoder uses Smith's matmul via im2col — no dedicated 1D conv sh
 
 ## Models
 
-Download GGML models from [huggingface.co/ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp):
+Models are managed through Smith's model registry. Use `--list-models` to see what's available:
 
-| Model | Size | Quality |
-|-------|------|---------|
-| `ggml-tiny.bin` | 75 MB | Good for short, clear audio |
-| `ggml-base.en.bin` | 142 MB | Better accuracy, English only |
-| `ggml-small.bin` | 466 MB | High quality, multilingual |
-| `ggml-medium.bin` | 1.5 GB | Very high quality |
+```bash
+bun examples/whisper/cli.js --list-models
+```
+
+| Registry ID | Size | Quality |
+|-------------|------|---------|
+| `whisper-tiny` | 75 MB | Good for short, clear audio |
+| `whisper-tiny-en` | 75 MB | Same size, English only |
+| `whisper-base` | 142 MB | Better accuracy, multilingual |
+| `whisper-base-en` | 142 MB | Better accuracy, English only |
+| `whisper-small` | 466 MB | High quality, multilingual |
+| `whisper-medium` | 1.5 GB | Very high quality |
+
+Models auto-download from [huggingface.co/ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp) on first use and cache in `models/<id>/`.
 
 ## Audio Format
 
@@ -88,5 +102,4 @@ bun test examples/whisper/tests/model.test.js
 - WAV only (no MP3/FLAC/OGG decoding yet)
 - No word-level timestamps
 - No voice activity detection
-- Conv1d uses CPU-side im2col (no dedicated Metal shader)
-- Mel spectrogram computed on CPU (could be GPU-accelerated)
+- Mel spectrogram computed on CPU (GPU alternative available via `smith.gpuMelSpectrogram`)

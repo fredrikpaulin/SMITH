@@ -3,13 +3,15 @@
 // Whisper speech-to-text CLI powered by Smith (Metal GPU).
 //
 // Usage:
-//   bun examples/whisper/cli.js --model ggml-tiny.bin --file audio.wav
-//   bun examples/whisper/cli.js --model ggml-base.bin --file audio.wav --language en
+//   bun examples/whisper/cli.js --model whisper-tiny --file audio.wav
+//   bun examples/whisper/cli.js --model whisper-base-en --file audio.wav --language en
+//   bun examples/whisper/cli.js --model path/to/ggml-tiny.bin --file audio.wav
 //
-// Requires a whisper.cpp GGML model file (.bin) from:
-//   https://huggingface.co/ggerganov/whisper.cpp
+// Models can be a registry ID (auto-fetched from HF) or a file path.
+// Run with --list-models to see available models.
 
 import { parseArgs } from 'util'
+import { existsSync } from 'fs'
 import { loadAudio } from './audio.js'
 import { melSpectrogram } from './mel.js'
 import { loadWhisperGGML } from './loader.js'
@@ -28,19 +30,32 @@ const { values: args } = parseArgs({
     format: { type: 'string', default: 'text' },
     verbose: { type: 'boolean', short: 'v', default: false },
     help: { type: 'boolean', short: 'h', default: false },
+    'list-models': { type: 'boolean', default: false },
   },
   strict: false,
 })
+
+// List available whisper models from registry
+if (args['list-models']) {
+  const models = smith.listModels().filter(m => m.loader === 'whisper')
+  console.log('Available Whisper models:\n')
+  for (const m of models) {
+    const status = m.cached ? '  [cached]' : ''
+    console.log(`  ${m.id.padEnd(20)} ${m.description}${status}`)
+  }
+  console.log(`\nUsage: bun examples/whisper/cli.js --model <id> --file <audio.wav>`)
+  process.exit(0)
+}
 
 if (args.help || !args.model || !args.file) {
   console.log(`
 Whisper — Speech-to-Text on Apple Silicon GPU
 
 Usage:
-  bun examples/whisper/cli.js --model <model.bin> --file <audio.wav> [options]
+  bun examples/whisper/cli.js --model <id|path> --file <audio.wav> [options]
 
 Options:
-  -m, --model <path>       Path to whisper.cpp GGML model (.bin)
+  -m, --model <id|path>    Model registry ID or path to GGML file (.bin)
   -f, --file <path>        Path to audio file (.wav, 16-bit PCM)
   -l, --language <code>    Language code (default: en)
   --max-tokens <n>         Maximum tokens to generate (default: 224)
@@ -48,21 +63,66 @@ Options:
   -o, --output <path>      Write output to file instead of stdout
   --format <fmt>           Output format: text, json, srt, vtt (default: text)
   -v, --verbose            Show timing and model info
+  --list-models            List available models from registry
   -h, --help               Show this help
 
 Models:
-  Download GGML models from https://huggingface.co/ggerganov/whisper.cpp
-  Recommended: ggml-tiny.bin (75MB) or ggml-base.en.bin (142MB)
+  Use a registry ID (auto-downloads from HF if not cached):
+    whisper-tiny       39M params, multilingual, 75 MB
+    whisper-tiny-en    39M params, English only, 75 MB
+    whisper-base       74M params, multilingual, 142 MB
+    whisper-base-en    74M params, English only, 142 MB
+    whisper-small      244M params, multilingual, 466 MB
+    whisper-medium     769M params, multilingual, 1.5 GB
+
+  Or pass a direct path to a GGML model file (.bin).
 `)
   process.exit(args.help ? 0 : 1)
+}
+
+/** Resolve --model to a file path. Registry ID → fetch if needed. File path → use directly. */
+async function resolveModelPath(modelArg) {
+  // If it looks like a file path (has extension or separator), use directly
+  if (existsSync(modelArg) || modelArg.includes('/') || modelArg.includes('.')) {
+    return modelArg
+  }
+
+  // Try registry
+  const entry = smith.getModel(modelArg)
+  if (!entry) {
+    throw new Error(`Unknown model "${modelArg}". Use --list-models to see available models, or pass a file path.`)
+  }
+
+  // Check if cached
+  const cached = smith.modelPath(modelArg)
+  if (cached) return cached
+
+  // Fetch from HF
+  console.error(`Downloading ${entry.description}...`)
+  const result = await smith.fetchModel(modelArg, {
+    onProgress: (file, downloaded, total) => {
+      if (total > 0) {
+        const pct = (downloaded / total * 100).toFixed(1)
+        const mb = (downloaded / 1e6).toFixed(1)
+        process.stderr.write(`\r  ${file}: ${mb} MB (${pct}%)`)
+      }
+    },
+  })
+  console.error('')  // newline after progress
+
+  return smith.modelPath(modelArg)
 }
 
 async function main() {
   const t0 = performance.now()
 
+  // Resolve model path (registry ID or file path)
+  if (args.verbose) console.error('Resolving model...')
+  const modelFile = await resolveModelPath(args.model)
+
   // Load model
-  if (args.verbose) console.error('Loading model...')
-  const { model, config, vocab, melFilters, hparams } = await loadWhisperGGML(args.model)
+  if (args.verbose) console.error(`Loading model from ${modelFile}...`)
+  const { model, config, vocab, melFilters, hparams } = await loadWhisperGGML(modelFile)
 
   if (args.verbose) {
     const info = smith.info()

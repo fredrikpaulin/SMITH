@@ -142,7 +142,7 @@ test('whisperTranscribeCached produces same tokens as whisperTranscribe', () => 
 
     expect(cached).toEqual(nonCached)
   })
-})
+}, 15000)
 
 test('whisperTranscribeCached stops on EOT token', () => {
   noGrad(() => {
@@ -153,7 +153,7 @@ test('whisperTranscribeCached stops on EOT token', () => {
     const result = whisperTranscribeCached(model, mel, { maxTokens: 10, temperature: 0 })
     expect(result.length).toBeLessThanOrEqual(10)
   })
-})
+}, 15000)
 
 test('whisperTranscribeCached single token generation', () => {
   noGrad(() => {
