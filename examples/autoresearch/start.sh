@@ -49,4 +49,4 @@ echo ""
 #   Bash(cat*)     — read files
 #   Edit, Read     — modify model.js / train.js
 claude --allowedTools "Bash(bun*),Bash(git*),Bash(grep*),Bash(cat*),Bash(tail*),Bash(head*),Edit,Read" \
-  -p "start autoresearch"
+"start autoresearch"
