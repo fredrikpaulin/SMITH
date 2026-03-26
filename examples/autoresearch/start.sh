@@ -42,10 +42,6 @@ echo "  Train: train.js (modifiable)"
 echo ""
 
 # --allowedTools lets the agent run without permission prompts.
-# Scoped to:
-#   Bash(bun*)     — run training and research.js
-#   Bash(git*)     — commit, revert, branch
-#   Bash(grep*)    — parse logs
-#   Bash(cat*)     — read files
-#   Edit, Read     — modify model.js / train.js
-claude "start autoresearch" --allowedTools "Bash(bun*),Bash(git*),Bash(grep*),Bash(cat*),Bash(tail*),Bash(head*),Edit,Read"
+# Bash(*) allows all shell commands — the CLAUDE.md constrains what
+# the agent actually does (only bun, git, grep, cat, tail, head).
+claude "start autoresearch" --allowedTools "Bash(*),Edit,Read,Write"
