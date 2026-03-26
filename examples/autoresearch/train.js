@@ -29,9 +29,9 @@ import { load as loadTokenizer } from '../../src/tokenizer.js'
 const { values: args } = parseArgs({
   options: {
     depth: { type: 'string', default: '4' },
-    dim: { type: 'string', default: '256' },
+    dim: { type: 'string', default: '128' },
     'seq-len': { type: 'string', default: '512' },
-    'head-dim': { type: 'string', default: '64' },
+    'head-dim': { type: 'string', default: '32' },
     vocab: { type: 'string', default: '4096' },
     'batch-size': { type: 'string', default: '8192' },
     'time-budget': { type: 'string', default: '60' },
