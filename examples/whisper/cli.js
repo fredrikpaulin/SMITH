@@ -15,8 +15,9 @@ import { existsSync } from 'fs'
 import { loadAudio } from './audio.js'
 import { melSpectrogram } from './mel.js'
 import { loadWhisperGGML } from './loader.js'
-import { whisperTranscribe } from './model.js'
+import { whisperTranscribeCached } from './model.js'
 import { createTokenizer, SPECIAL_TOKENS, languageToken } from './tokenizer.js'
+import { chunkAudio, transcribeChunk, stitchTranscriptions, WHISPER_CHUNK_SAMPLES } from './chunk.js'
 import smith from '../../src/index.js'
 
 const { values: args } = parseArgs({
@@ -140,22 +141,31 @@ async function main() {
 
   const t2 = performance.now()
 
-  // Extract mel spectrogram
-  if (args.verbose) console.error('Computing mel spectrogram...')
-  const { mel, nMels, numFrames } = melSpectrogram(samples, {
-    nMels: config.nMels,
-    sampleRate,
+  // Create tokenizer
+  const tokenizer = createTokenizer(vocab)
+  const audioDuration = samples.length / sampleRate
+
+  // Chunk audio if longer than 30 seconds
+  const chunks = chunkAudio(samples, {
+    chunkSamples: WHISPER_CHUNK_SAMPLES,
+    overlapSamples: 1 * sampleRate, // 1 second overlap
   })
-  if (args.verbose) console.error(`Mel: ${nMels}x${numFrames}`)
+
+  if (args.verbose) {
+    if (chunks.length > 1) {
+      console.error(`Audio: ${audioDuration.toFixed(1)}s → ${chunks.length} chunks (30s each, 1s overlap)`)
+    } else {
+      console.error(`Audio: ${audioDuration.toFixed(1)}s (single chunk)`)
+    }
+  }
 
   const t3 = performance.now()
 
-  // Create tokenizer
-  const tokenizer = createTokenizer(vocab)
-
-  // Transcribe
+  // Transcribe each chunk
   if (args.verbose) console.error('Transcribing...')
-  const tokens = whisperTranscribe(model, mel, {
+
+  const transcribeOpts = {
+    nMels: config.nMels,
     maxTokens: parseInt(args['max-tokens']),
     temperature: parseFloat(args.temperature),
     eotToken: SPECIAL_TOKENS.EOT,
@@ -163,12 +173,26 @@ async function main() {
     langToken: languageToken(args.language),
     transcribeToken: SPECIAL_TOKENS.TRANSCRIBE,
     noTimestamps: SPECIAL_TOKENS.NOT,
-    onToken: args.verbose ? (token, step) => {
-      process.stderr.write('.')
-    } : undefined,
-  })
+    useCached: true,
+  }
 
-  if (args.verbose) console.error('')
+  const chunkResults = []
+  for (let i = 0; i < chunks.length; i++) {
+    if (args.verbose && chunks.length > 1) {
+      console.error(`  Chunk ${i + 1}/${chunks.length} (${(chunks[i].offsetSamples / sampleRate).toFixed(1)}s)...`)
+    }
+    const result = await transcribeChunk(model, chunks[i], {
+      ...transcribeOpts,
+      onToken: args.verbose ? () => process.stderr.write('.') : undefined,
+    })
+    chunkResults.push(result)
+    if (args.verbose) console.error('')
+  }
+
+  // Stitch chunks together
+  const tokens = stitchTranscriptions(chunkResults, tokenizer, {
+    overlapMs: 1000,
+  })
 
   const t4 = performance.now()
 
@@ -181,12 +205,13 @@ async function main() {
     output = JSON.stringify({
       text: text.trim(),
       tokens,
+      chunks: chunks.length,
       language: args.language,
-      duration: samples.length / sampleRate,
+      duration: audioDuration,
       timing: args.verbose ? {
         modelLoadMs: t1 - t0,
         audioLoadMs: t2 - t1,
-        melMs: t3 - t2,
+        chunkMs: t3 - t2,
         transcribeMs: t4 - t3,
         totalMs: t4 - t0,
       } : undefined,
@@ -214,8 +239,8 @@ async function main() {
     console.error(`\nTiming:`)
     console.error(`  Model load: ${(t1 - t0).toFixed(0)}ms`)
     console.error(`  Audio load: ${(t2 - t1).toFixed(0)}ms`)
-    console.error(`  Mel spectrogram: ${(t3 - t2).toFixed(0)}ms`)
-    console.error(`  Transcription: ${(t4 - t3).toFixed(0)}ms`)
+    console.error(`  Chunking: ${(t3 - t2).toFixed(0)}ms`)
+    console.error(`  Transcription (${chunks.length} chunk${chunks.length > 1 ? 's' : ''}): ${(t4 - t3).toFixed(0)}ms`)
     console.error(`  Total: ${(t4 - t0).toFixed(0)}ms`)
   }
 }

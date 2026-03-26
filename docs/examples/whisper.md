@@ -311,6 +311,24 @@ tokenizer.timestampToSeconds(50414)  // 1.0 (each step = 0.02s)
 
 **`languageToken(lang)`** — Returns the token ID for a language code. Defaults to English if the code is not found.
 
+### chunk.js — Audio Chunking and Stitching
+
+Pure JavaScript audio chunking for long audio files. Splits audio into overlapping 30-second windows and stitches per-chunk transcriptions back together with text-based deduplication.
+
+```js
+import { chunkAudio, stitchTranscriptions, transcribeChunk } from './chunk.js'
+```
+
+**`chunkAudio(samples, opts?)`** — Split a Float32Array of 16kHz audio into overlapping chunks. Returns `[{ samples, offsetSamples }]`. Options: `chunkSamples` (default 480000 = 30s), `overlapSamples` (default 16000 = 1s). Audio shorter than 30s returns a single chunk with no copy.
+
+**`stitchTranscriptions(chunkResults, tokenizer, opts?)`** — Merge per-chunk token arrays. Deduplicates tokens in overlap regions by checking if decoded text from the start of each chunk matches the end of accumulated text. Returns a flat token array.
+
+**`transcribeChunk(model, chunk, opts?)`** — Transcribe a single chunk. Computes mel spectrogram and runs cached Whisper inference. Returns `{ tokens, offsetMs }`. Async (lazily loads model.js).
+
+**`transcribeChunked(model, samples, opts?)`** — Full pipeline: chunk → transcribe each → return per-chunk results. Async. Options include `onChunk(i, total)` callback for progress.
+
+**`WHISPER_CHUNK_SAMPLES`** — Constant: `480000` (30 seconds at 16kHz).
+
 ## Audio Format
 
 The WAV decoder supports PCM int8, int16, int32, and IEEE float32. Any sample rate is accepted — audio is automatically resampled to 16kHz. Stereo files are mixed to mono by averaging channels.
@@ -343,9 +361,8 @@ bun test examples/whisper/tests/
 
 - **WAV only.** No MP3, FLAC, or OGG decoding. Convert with FFmpeg.
 - **No word-level timestamps.** Output is a single text string. Whisper supports timestamps via special tokens, but decoding them requires token suppression logic not yet implemented.
-- **No voice activity detection.** The full audio is processed as one 30-second chunk.
+- **No voice activity detection.** Long audio is split at fixed 30-second boundaries with 1-second overlap. Smarter splitting at silence boundaries would improve accuracy at chunk edges.
 - **CPU mel spectrogram in example.** The example's `mel.js` uses CPU FFT. Smith now provides `gpuMelSpectrogram()` as a drop-in GPU alternative for batch processing.
-- **No streaming.** The entire audio file is loaded into memory and processed at once.
 
 ## Extending
 

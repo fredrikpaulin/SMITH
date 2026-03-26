@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.23.0 — Chunked Whisper Audio (2026-03-26)
+
+### Added
+
+- **`examples/whisper/chunk.js`** — Chunked audio processing for Whisper. `chunkAudio(samples, opts)` splits audio into overlapping 30-second windows. `stitchTranscriptions(chunkResults, tokenizer)` merges per-chunk token arrays with text-based deduplication in overlap regions. `transcribeChunk(model, chunk, opts)` and `transcribeChunked(model, samples, opts)` provide the full pipeline with progress callbacks.
+- **Tests** — 16 chunk tests: chunkAudio for known durations (10s, 30s, 31s, 60s, 90s, zero-length), overlap sample verification, custom chunk sizes, last-chunk-shorter, stitch empty/single/non-overlapping/overlapping/three-chunk, WHISPER_CHUNK_SAMPLES constant.
+
+### Changed
+
+- **`examples/whisper/cli.js`** — Replaced single-chunk transcription with chunked pipeline. Audio longer than 30 seconds is automatically split, transcribed per-chunk, and stitched. Per-chunk progress in verbose mode. JSON output includes chunk count.
+- **`examples/whisper/README.md`** — Architecture diagram updated for chunk.js. Added Long Audio section. Updated limitations.
+
 ## 0.22.0 — Tensor Lifecycle Management (2026-03-26)
 
 ### Added

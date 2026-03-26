@@ -39,8 +39,8 @@ bun examples/whisper/cli.js --model path/to/ggml-tiny.bin --file recording.wav
 ## Architecture
 
 ```
-audio.wav ──► WAV decoder ──► 16kHz mono ──► mel spectrogram ──► Whisper encoder ──► Whisper decoder ──► text
-              (audio.js)      (resample)     (mel.js)           (model.js)          (model.js)         (tokenizer.js)
+audio.wav ──► WAV decoder ──► 16kHz mono ──► chunk (if >30s) ──► mel spectrogram ──► Whisper encoder ──► Whisper decoder ──► stitch ──► text
+              (audio.js)      (resample)     (chunk.js)          (mel.js)           (model.js)          (model.js)         (chunk.js)
 ```
 
 ### Components
@@ -50,6 +50,7 @@ audio.wav ──► WAV decoder ──► 16kHz mono ──► mel spectrogram �
 | `cli.js` | CLI entry point |
 | `audio.js` | WAV file decoder + resampler (pure JS) |
 | `mel.js` | FFT, STFT, mel filterbank (pure JS) |
+| `chunk.js` | Audio chunking + transcription stitching for long audio (pure JS) |
 | `model.js` | Whisper encoder-decoder transformer (Smith GPU ops) |
 | `loader.js` | Load weights from whisper.cpp GGML format |
 | `ggml_parser.js` | Pure JS GGML binary parser (no GPU dependency) |
@@ -92,14 +93,26 @@ bun test examples/whisper/tests/audio.test.js
 bun test examples/whisper/tests/mel.test.js
 bun test examples/whisper/tests/tokenizer.test.js
 bun test examples/whisper/tests/loader.test.js
+bun test examples/whisper/tests/chunk.test.js
 
 # Run GPU tests (requires macOS + Apple Silicon)
 bun test examples/whisper/tests/model.test.js
 ```
 
+## Long Audio
+
+Audio longer than 30 seconds is automatically split into overlapping 30-second chunks, transcribed independently, and stitched together. The 1-second overlap between chunks prevents boundary words from being lost. No length limit.
+
+```bash
+# Works on any length — 5 minutes, 30 minutes, etc.
+bun examples/whisper/cli.js --model whisper-tiny --file long-podcast.wav -v
+```
+
+Verbose mode shows per-chunk progress.
+
 ## Limitations
 
 - WAV only (no MP3/FLAC/OGG decoding yet)
 - No word-level timestamps
-- No voice activity detection
+- No voice activity detection (chunks at fixed 30s boundaries, not silence)
 - Mel spectrogram computed on CPU (GPU alternative available via `smith.gpuMelSpectrogram`)
