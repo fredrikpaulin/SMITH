@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.18.0 — GPU Conv1d (im2col + col2im) (2026-03-26)
+
+### Changed
+
+- **Conv1d fully GPU-accelerated** — Both forward (im2col) and backward (col2im) now run on Metal GPU instead of CPU loops. Forward uses a dedicated `im2col_1d_forward` shader to extract patches, followed by the existing tiled matmul. Backward uses `col2im_1d_backward` shader for scatter-add input gradient reconstruction. The API is unchanged: `conv1d(input, weight, bias, { stride, padding })`.
+
+### Added
+
+- **`shaders/conv1d.metal`** — Two Metal compute kernels: `im2col_1d_forward` (gather input patches into column matrix) and `col2im_1d_backward` (scatter-add columns back to input gradient). Handles arbitrary stride and padding. No batch dimension — operates on single `[C_in, length]` inputs matching Smith's existing conv1d signature.
+- **`src/ops/conv1d.js`** — GPU dispatch module for 1D convolution: `im2col1d`, `col2im1d`, `conv1dForward`, `conv1dBackwardInput`, `conv1dBackwardWeight`. Follows the same structure as `conv2d_im2col.js`.
+- **Tests** — 2 additional conv1d tests: multi-channel backward with stride+padding, and GPU col2im analytical verification.
+
 ## 0.17.0 — Conv1d, Cross-Attention, Sinusoidal PE (2026-03-26)
 
 ### Added

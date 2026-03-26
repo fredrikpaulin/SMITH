@@ -25,6 +25,7 @@ import { batchnormForward as gpuBnFwd, batchnormInference as gpuBnInfer, batchno
 import { ropeForward as gpuRopeFwd, ropeBackward as gpuRopeBwd, precomputeRoPE } from './ops/rope.js'
 import { rmsnormForward as gpuRmsnormFwd, rmsnormBackward as gpuRmsnormBwd } from './ops/rmsnorm.js'
 import { swigluForward as gpuSwigluFwd, swigluBackward as gpuSwigluBwd } from './ops/swiglu.js'
+import * as conv1dGpu from './ops/conv1d.js'
 
 let _noGrad = false
 
@@ -409,62 +410,26 @@ function conv1d(input, weight, bias, opts = {}) {
   const padding = opts.padding || 0
   const [cIn, length] = input.data.shape
   const [cOut, wCIn, kernelSize] = weight.data.shape
-  const outLen = Math.floor((length + 2 * padding - kernelSize) / stride) + 1
 
-  // im2col: [C_in * K, L_out]
-  const patchData = new Float32Array(cIn * kernelSize * outLen)
-  const xArr = T.contiguous(input.data).data
-  for (let t = 0; t < outLen; t++) {
-    const startPos = t * stride - padding
-    for (let c = 0; c < cIn; c++) {
-      for (let k = 0; k < kernelSize; k++) {
-        const pos = startPos + k
-        if (pos >= 0 && pos < length) {
-          patchData[(c * kernelSize + k) * outLen + t] = xArr[c * length + pos]
-        }
-      }
-    }
-  }
-
-  const patches = T.tensor(Array.from(patchData), [cIn * kernelSize, outLen])
-  // weight: [C_out, C_in, K] → [C_out, C_in * K]
-  const wFlat = gpuReshape(weight.data, [cOut, cIn * kernelSize])
-  // matmul: [C_out, C_in*K] @ [C_in*K, L_out] = [C_out, L_out]
-  let outData = gpuMatmul(wFlat, patches)
-
-  if (bias) {
-    // bias: [C_out] → [C_out, 1] for broadcast add
-    const biasCol = gpuReshape(bias.data, [cOut, 1])
-    outData = gpuAdd(outData, biasCol)
-  }
+  // GPU im2col forward: extracts patches on GPU, then GEMM
+  const { output: outData, patches } = conv1dGpu.conv1dForward(
+    T.contiguous(input.data), T.contiguous(weight.data),
+    bias ? T.contiguous(bias.data) : null,
+    stride, padding
+  )
 
   return variable(outData, {
     _deps: bias ? [input, weight, bias] : [input, weight],
     _backward: _noGrad ? null : (grad) => {
-      // grad: [C_out, L_out]
       // dW: grad @ patches^T → [C_out, C_in*K] → reshape to [C_out, C_in, K]
-      const patchesTensor = T.tensor(Array.from(patchData), [cIn * kernelSize, outLen])
-      const patchesT = gpuTranspose(patchesTensor, [1, 0])
-      const dWFlat = gpuMatmul(grad, patchesT) // [C_out, C_in*K]
-      addGrad(weight, gpuReshape(dWFlat, [cOut, cIn, kernelSize]))
+      const dW = conv1dGpu.conv1dBackwardWeight(grad, patches, weight.data.shape)
+      addGrad(weight, dW)
 
-      // dX: W^T @ grad → [C_in*K, L_out], then col2im
-      const wFlatT = gpuTranspose(wFlat, [1, 0]) // [C_in*K, C_out]
-      const dPatches = gpuMatmul(wFlatT, grad) // [C_in*K, L_out]
-      const dPatchesArr = T.contiguous(dPatches).data
-      const dXArr = new Float32Array(cIn * length)
-      for (let t = 0; t < outLen; t++) {
-        const startPos = t * stride - padding
-        for (let c = 0; c < cIn; c++) {
-          for (let k = 0; k < kernelSize; k++) {
-            const pos = startPos + k
-            if (pos >= 0 && pos < length) {
-              dXArr[c * length + pos] += dPatchesArr[(c * kernelSize + k) * outLen + t]
-            }
-          }
-        }
-      }
-      addGrad(input, T.tensor(Array.from(dXArr), [cIn, length]))
+      // dX: W^T @ grad → col2im on GPU
+      const dX = conv1dGpu.conv1dBackwardInput(
+        grad, T.contiguous(weight.data), length, stride, padding
+      )
+      addGrad(input, dX)
 
       if (bias) {
         // dBias: sum grad over L_out dimension

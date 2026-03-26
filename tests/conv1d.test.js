@@ -133,6 +133,57 @@ test('conv1d backward — bias gradient', () => {
   expect(b.grad.data[0]).toBeCloseTo(3)
 })
 
+test('conv1d backward — multi-channel with stride and padding', () => {
+  // 2 input channels, 3 output channels, kernel=3, stride=2, padding=1
+  const cIn = 2, cOut = 3, len = 8, k = 3
+  const x = variable(tensor(Array.from({ length: cIn * len }, (_, i) => (i + 1) * 0.1), [cIn, len]), { requiresGrad: true })
+  const w = variable(tensor(Array.from({ length: cOut * cIn * k }, (_, i) => (i % 5 - 2) * 0.1), [cOut, cIn, k]), { requiresGrad: true })
+  const b = variable(tensor(Array.from({ length: cOut }, (_, i) => i * 0.5), [cOut]), { requiresGrad: true })
+  const out = conv1d(x, w, b, { stride: 2, padding: 1 })
+
+  expect(out.data.shape).toEqual([cOut, conv1dOutputSize(len, k, 2, 1)])
+
+  const loss = smith.sum(out)
+  backward(loss)
+
+  // All three grads must exist and have correct shapes
+  expect(x.grad.shape).toEqual([cIn, len])
+  expect(w.grad.shape).toEqual([cOut, cIn, k])
+  expect(b.grad.shape).toEqual([cOut])
+
+  // bias grad = number of output positions per output channel
+  const outLen = conv1dOutputSize(len, k, 2, 1)
+  for (let oc = 0; oc < cOut; oc++) {
+    expect(b.grad.data[oc]).toBeCloseTo(outLen)
+  }
+})
+
+test('conv1d GPU col2im matches expected — stride 1 no padding', () => {
+  // Verify the col2im scatter-add is correct by checking input grad analytically
+  // x = [1], len=4: [1, 2, 3, 4], w = [1, 1, 2]: [0.5, 1.0], kernel=2, stride=1, pad=0
+  const x = variable(tensor([1, 2, 3, 4], [1, 4]), { requiresGrad: true })
+  const w = variable(tensor([0.5, 1.0], [1, 1, 2]), { requiresGrad: false })
+  const out = conv1d(x, w, null, { stride: 1, padding: 0 })
+  // out = [0.5*1+1.0*2, 0.5*2+1.0*3, 0.5*3+1.0*4] = [2.5, 4.0, 5.5]
+  expect(out.data.shape).toEqual([1, 3])
+  expect(out.data.data[0]).toBeCloseTo(2.5)
+  expect(out.data.data[1]).toBeCloseTo(4.0)
+  expect(out.data.data[2]).toBeCloseTo(5.5)
+
+  const loss = smith.sum(out)
+  backward(loss)
+
+  // dX: col2im of W^T @ ones
+  // pos 0: only contributes to out[0] via k=0 → w[0]=0.5
+  // pos 1: out[0] via k=1 → w[1]=1.0, out[1] via k=0 → w[0]=0.5 → total 1.5
+  // pos 2: out[1] via k=1 → w[1]=1.0, out[2] via k=0 → w[0]=0.5 → total 1.5
+  // pos 3: out[2] via k=1 → w[1]=1.0
+  expect(x.grad.data[0]).toBeCloseTo(0.5)
+  expect(x.grad.data[1]).toBeCloseTo(1.5)
+  expect(x.grad.data[2]).toBeCloseTo(1.5)
+  expect(x.grad.data[3]).toBeCloseTo(1.0)
+})
+
 test('conv1d Whisper encoder shapes', () => {
   noGrad(() => {
     // Whisper tiny: conv1(80→384, k=3, s=1, p=1) then conv2(384→384, k=3, s=2, p=1)

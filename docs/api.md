@@ -47,7 +47,7 @@ All ops return new Variables with backward functions.
 
 **Shape:** `reshape(a, shape)`, `transpose(a, axes?)`
 
-**Conv1d:** `conv1d(input, weight, bias, opts?)` — 1D convolution with full autograd. Input `[C_in, length]`, weight `[C_out, C_in, kernel]`, bias `[C_out]` or null. Options: `{ stride, padding }`. Uses im2col + matmul internally.
+**Conv1d:** `conv1d(input, weight, bias, opts?)` — 1D convolution with full autograd. Input `[C_in, length]`, weight `[C_out, C_in, kernel]`, bias `[C_out]` or null. Options: `{ stride, padding }`. GPU im2col + matmul forward, GPU col2im backward.
 
 `conv1dOutputSize(length, kernelSize, stride, padding)` — compute output length.
 
