@@ -135,6 +135,41 @@ const ids = generate(model, promptIds, { maxTokens, temperature, topK, topP, rep
 const ids = generateCached(model, promptIds, { maxTokens, temperature, topK, topP, repetitionPenalty })
 ```
 
+## GPU Sampling
+
+GPU-side sampling keeps logits on the GPU. Only 4 bytes (one token index) cross the GPU→CPU boundary per token. Enable with `gpuSampling: true` in generation config.
+
+```js
+// GPU sampling in generateGGUF
+const ids = generateGGUF(model, promptIds, {
+  maxTokens: 100,
+  temperature: 0.8,
+  topK: 40,
+  topP: 0.9,
+  repetitionPenalty: 1.1,
+  gpuSampling: true,   // use GPU sampling pipeline
+})
+
+// Low-level GPU sampling on a logits tensor
+const tokenId = gpuSample(logitsTensor, {
+  temperature: 0.8,
+  topK: 40,
+  topP: 0.9,
+  repetitionPenalty: 1.1,
+  recentTokens: [...previousIds],
+})
+
+// GPU argmax (greedy decoding)
+const tokenId = gpuArgmax(logitsTensor)
+```
+
+| Function | Description |
+|----------|-------------|
+| `gpuArgmax(logits)` | Parallel reduction argmax. Returns index of maximum value. |
+| `gpuSample(logits, config)` | Full sampling pipeline: penalties → temperature → top-K → softmax → top-P → multinomial. Returns token index. |
+
+Pipeline for `gpuSample` at `temperature > 0`: `apply_rep_penalty` → `apply_temperature` → `topk_find_threshold` + `topk_mask` → `softmax_forward` → CPU top-P → `multinomial_sample`. At `temperature = 0`: `apply_rep_penalty` → `argmax_reduce`.
+
 ## Safetensors
 
 ```js

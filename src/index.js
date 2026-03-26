@@ -16,6 +16,7 @@ import { loadGGUF, createGGUFCache, resetCache as resetGGUFCache, generateGGUF }
 import { parseGGUF, listTensors as listGGUFTensors, extractConfig as extractGGUFConfig } from './gguf.js'
 import { poolStats, poolDrain } from './pool.js'
 import { gpuFFT, gpuIFFT, gpuBatchFFT } from './ops/fft.js'
+import { gpuArgmax, gpuSample } from './ops/sampling.js'
 import { gpuMelSpectrogram } from './ops/mel.js'
 import { dtypeBytes, toFloat16, fromFloat16, float32ToFloat16, float16ToFloat32 } from './dtype.js'
 import { f16Mode, defaultDtype, createLossScaler } from './f16mode.js'
@@ -194,6 +195,9 @@ const smith = {
   fft, gpuFFT, gpuIFFT, gpuBatchFFT,
   gpuMelSpectrogram,
 
+  // GPU sampling
+  gpuArgmax, gpuSample,
+
   // RoPE / RMSNorm / SwiGLU
   rope, rmsNorm, swiglu, precomputeRoPE,
 
@@ -261,6 +265,7 @@ export {
   rope, rmsNorm, swiglu, precomputeRoPE,
   fft, gpuFFT, gpuIFFT, gpuBatchFFT,
   gpuMelSpectrogram,
+  gpuArgmax, gpuSample,
   createResNet, forwardResNet, resnetParams, mapResNetWeights, loadResNet, RESNET_CONFIGS,
   createCLIP, forwardVision, forwardText, clipSimilarity, l2Normalize, clipParams, mapCLIPWeights, loadCLIP, CLIP_CONFIGS,
   resizeBilinear, centerCrop, normalizeImage,

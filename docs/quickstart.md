@@ -149,6 +149,22 @@ const weights = smith.using(() => {
 smith.dispose(weights) // free manually when done
 ```
 
+## GPU Sampling
+
+Keep the entire sampling pipeline on the GPU. Only 4 bytes per token cross to the CPU.
+
+```js
+import { generateGGUF, loadGGUF } from './src/index.js'
+
+const model = await loadGGUF('models/my-model.gguf')
+const ids = generateGGUF(model, promptIds, {
+  maxTokens: 100,
+  temperature: 0.8,
+  topK: 40,
+  gpuSampling: true,  // penalties, top-K, softmax, and sampling all on GPU
+})
+```
+
 ## Benchmarks
 
 ```sh

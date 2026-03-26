@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.24.0 — GPU-Side Sampling (2026-03-26)
+
+### Added
+
+- **`shaders/sampling.metal`** — Six GPU kernels for autoregressive sampling: `argmax_reduce` / `argmax_reduce_final` (parallel reduction argmax), `apply_rep_penalty` (repetition penalty in-place), `apply_temperature` (temperature scaling in-place), `topk_find_threshold` / `topk_mask` (top-K filtering via threshold), `multinomial_sample` (prefix-sum CDF sampling).
+- **`src/ops/sampling.js`** — GPU dispatch layer. `gpuArgmax(logits)` returns token index via two-pass parallel reduction. `gpuSample(logits, config)` runs the full pipeline: penalties → temperature → top-K → softmax → top-P → multinomial. Only 4 bytes cross GPU→CPU per token.
+- **`gpuSampling` config option** — Pass `gpuSampling: true` to `generateGGUF` to use the GPU sampling path. Defaults to `false` for backward compatibility.
+- **Tests** — 30+ sampling tests covering argmax, penalties, temperature, top-K, top-P, multinomial, full pipeline, and generateGGUF integration.
+
+### Changed
+
+- **`src/gguf_cache.js`** — `generateGGUF` refactored with `extractLastLogits()` and `sampleToken()` helpers supporting both CPU and GPU (`gpuSampling: true`) sampling paths.
+
 ## 0.23.0 — Chunked Whisper Audio (2026-03-26)
 
 ### Added

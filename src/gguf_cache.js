@@ -272,6 +272,39 @@ import {
   applyTemperature, applyTopK, applyTopP,
   applyRepetitionPenalty, sampleFromLogits, argmax,
 } from './generate.js'
+import { gpuSample } from './ops/sampling.js'
+
+// Extract logits for a single position as a 1D tensor [vocabSize].
+// For GPU sampling, we need the tensor on the GPU — not copied to a JS array.
+function extractLastLogits(logitsTensor, position, vocabSize) {
+  const out = T.create([vocabSize], logitsTensor.dtype)
+  const srcOff = position * vocabSize
+  out.data.set(logitsTensor.data.subarray(srcOff, srcOff + vocabSize))
+  return out
+}
+
+// Sample one token — GPU or CPU path
+function sampleToken(logitsTensor, generated, config) {
+  const { temperature, topK, topP, repetitionPenalty, gpuSampling } = config
+
+  if (gpuSampling) {
+    return gpuSample(logitsTensor, {
+      temperature,
+      topK,
+      topP,
+      repetitionPenalty,
+      recentTokens: generated,
+    })
+  }
+
+  // CPU path (original)
+  let logits = Array.from(logitsTensor.data)
+  logits = applyRepetitionPenalty(logits, generated, repetitionPenalty)
+  logits = applyTemperature(logits, temperature)
+  logits = applyTopK(logits, topK)
+  logits = applyTopP(logits, topP)
+  return temperature === 0 ? argmax(logits) : sampleFromLogits(logits)
+}
 
 function generateGGUF(model, promptIds, config = {}, callbacks = {}) {
   const {
@@ -281,8 +314,10 @@ function generateGGUF(model, promptIds, config = {}, callbacks = {}) {
     topP = 1.0,
     repetitionPenalty = 1.0,
     eosToken = null,
+    gpuSampling = false,
   } = config
 
+  const samplingConfig = { temperature, topK, topP, repetitionPenalty, gpuSampling }
   const vocabSize = model.config.vocabSize
   const maxSeqLen = model.config.maxSeqLen
   const generated = [...promptIds]
@@ -300,14 +335,8 @@ function generateGGUF(model, promptIds, config = {}, callbacks = {}) {
   let nextToken
   A.noGrad(() => {
     const result = forwardLlamaCachedPrefill(model, prompt, caches)
-    // Get logits for last token position
-    const lastPos = promptLen - 1
-    let lastLogits = Array.from(result.logits.data.data.slice(lastPos * vocabSize, (lastPos + 1) * vocabSize))
-    lastLogits = applyRepetitionPenalty(lastLogits, generated, repetitionPenalty)
-    lastLogits = applyTemperature(lastLogits, temperature)
-    lastLogits = applyTopK(lastLogits, topK)
-    lastLogits = applyTopP(lastLogits, topP)
-    nextToken = temperature === 0 ? argmax(lastLogits) : sampleFromLogits(lastLogits)
+    const lastLogits = extractLastLogits(result.logits.data, promptLen - 1, vocabSize)
+    nextToken = sampleToken(lastLogits, generated, samplingConfig)
   })
   generated.push(nextToken)
 
@@ -325,12 +354,8 @@ function generateGGUF(model, promptIds, config = {}, callbacks = {}) {
     const lastTok = generated[generated.length - 1]
     A.noGrad(() => {
       const result = forwardLlamaCachedDecode(model, lastTok, position, caches)
-      let lastLogits = Array.from(result.logits.data.data.slice(0, vocabSize))
-      lastLogits = applyRepetitionPenalty(lastLogits, generated, repetitionPenalty)
-      lastLogits = applyTemperature(lastLogits, temperature)
-      lastLogits = applyTopK(lastLogits, topK)
-      lastLogits = applyTopP(lastLogits, topP)
-      nextToken = temperature === 0 ? argmax(lastLogits) : sampleFromLogits(lastLogits)
+      const lastLogits = extractLastLogits(result.logits.data, 0, vocabSize)
+      nextToken = sampleToken(lastLogits, generated, samplingConfig)
     })
 
     generated.push(nextToken)
