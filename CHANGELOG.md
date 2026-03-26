@@ -8,7 +8,11 @@
 - **`examples/autoresearch/data.js`** — Data loading utilities. Binary uint16 token format, sequential data loader with wraparound, BPB (bits per byte) evaluation metric, and tokenizer training via Smith's built-in BPE.
 - **`examples/autoresearch/prepare.js`** — Data preparation CLI. Downloads public domain texts from Project Gutenberg, trains BPE tokenizer, saves tokenized train/val splits.
 - **`examples/autoresearch/train.js`** — Training loop with LR warmup/warmdown schedule, Muon momentum ramp, time-budgeted training, gradient accumulation across sequences, and final BPB evaluation.
-- **Tests** — Model tests (creation, init, forward shape, loss, backward gradients, optimizer step, loss reduction, VE placement, soft-capping bounds, window pattern). Data tests (loader shapes, advancement, wraparound, reset, BPB computation, special token handling).
+- **Tests** — Model tests (creation, init, forward shape, loss, backward gradients, optimizer step, loss reduction, VE placement, soft-capping bounds, window pattern, GQA forward/backward, T=1 single token, T=seqLen full length, full gradient flow after one optimizer step). Data tests (loader shapes, advancement, wraparound, reset, BPB computation, special token handling).
+
+### Changed
+
+- **Strengthened test suite with finite-difference gradient checks.** Added `numGradCheck` helpers to `autograd.test.js` and `transformer.test.js` that perturb each element ±ε and compare `(L+ - L-) / 2ε` against the analytical GPU backward pass. New tests: relu(64), gelu(64), mul chain(32), matmul(16×16), scale+add chain(64), layernorm input/gamma(4×8), softmax(4×16), cross-entropy(8×32). Also added larger-scale GPU-verified tests to `matmul.test.js` (16×16 identity, non-square [32×64]@[64×16], associativity), `conv1d.test.js` (multi-channel weight/input grad finite-diff with stride 2), and `div_gather.test.js` (256-element round trip, 2D 64×8 round trip, div finite-diff(64), gather backward(128, 32 indices)). Tolerances tuned for f32 GPU accumulation (0.01–0.1 depending on op).
 
 ## 0.28.0 — MuonAdamW Optimizer (2026-03-26)
 
