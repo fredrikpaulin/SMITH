@@ -8,7 +8,9 @@
 - **`examples/autoresearch/data.js`** — Data loading utilities. Binary uint16 token format, sequential data loader with wraparound, BPB (bits per byte) evaluation metric, and tokenizer training via Smith's built-in BPE.
 - **`examples/autoresearch/prepare.js`** — Data preparation CLI. Downloads public domain texts from Project Gutenberg, trains BPE tokenizer, saves tokenized train/val splits.
 - **`examples/autoresearch/train.js`** — Training loop with LR warmup/warmdown schedule, Muon momentum ramp, time-budgeted training, gradient accumulation across sequences, and final BPB evaluation.
-- **Tests** — Model tests (creation, init, forward shape, loss, backward gradients, optimizer step, loss reduction, VE placement, soft-capping bounds, window pattern, GQA forward/backward, T=1 single token, T=seqLen full length, full gradient flow after one optimizer step). Data tests (loader shapes, advancement, wraparound, reset, BPB computation, special token handling).
+- **`examples/autoresearch/research.js`** — Experiment runner for the autonomous research loop. Wraps training execution, parses output metrics, logs results to both `experiments.json` and `research_log.md`. Commands: `run`, `last`, `status`, `best`. Colorized TUI output with experiment timeline, improvement tracking, and hit rate statistics.
+- **`examples/autoresearch/CLAUDE.md`** — Agent prompt for Claude Code. Describes the setup procedure, experiment loop, rules (what's modifiable vs read-only), and research runner commands. Follows the Karpathy autoresearch pattern: one machine, one file, one metric, never stop.
+- **Tests** — Model tests (creation, init, forward shape, loss, backward gradients, optimizer step, loss reduction, VE placement, soft-capping bounds, window pattern, GQA forward/backward, T=1 single token, T=seqLen full length, full gradient flow after one optimizer step). Data tests (loader shapes, advancement, wraparound, reset, BPB computation, special token handling). Research runner tests (metric parsing, JSON roundtrip, best selection, status computation, markdown format, CLI args).
 
 ### Changed
 

@@ -131,3 +131,67 @@ bun test examples/autoresearch/tests/
 
 - **model.test.js** — Model creation, weight init, forward logit shape, loss, backward gradients (tests cProj/cMlpProj/lmHead since zero-init projections block upstream gradients on first step), optimizer step finiteness, loss reduction over 10 steps, VE layer placement, soft-capping bounds, window pattern, GQA forward/backward (nKVHead < nHead), T=1 single token edge case, T=seqLen full length, full gradient flow after one optimizer step (verifies cQ/cFc get gradients once projections are non-zero).
 - **data.test.js** — Loader shapes, position advancement, wraparound, reset, BPB computation, special token handling, totalTokens property.
+- **research.test.js** — Metric parsing from training output, experiment JSON serialization roundtrip, best-experiment selection, status computation, markdown log format, CLI argument parsing.
+
+## Autonomous Research Loop
+
+The autoresearch example includes an autonomous experiment loop powered by Claude Code. An AI agent runs training experiments, keeps improvements, discards regressions, and iterates indefinitely.
+
+### Quick Start
+
+```bash
+cd examples/autoresearch
+bash start.sh
+```
+
+The start script checks prerequisites (Bun, Smith native lib, Claude Code), prepares data if needed, and launches Claude Code. The agent walks you through creating a branch, establishing a baseline, and starting the experiment loop.
+
+Once running, the agent loops indefinitely — leave it overnight and review `results/research_log.md` in the morning.
+
+To set up manually instead:
+
+```bash
+bun examples/autoresearch/prepare.js         # prepare data
+cd examples/autoresearch && claude "start"    # launch agent
+```
+
+### How It Works
+
+The loop follows Karpathy's autoresearch pattern: **one machine, one file, one metric**.
+
+1. The agent reads experiment history and forms a hypothesis
+2. Edits `model.js` and/or `train.js` with an experimental change
+3. Commits the change and runs training via `research.js`
+4. If val_bpb improved, the commit stays. If not, `git reset --hard HEAD~1`
+5. Repeat forever — the agent never stops until manually interrupted
+
+### Research Runner
+
+`research.js` handles experiment execution and tracking:
+
+```bash
+# Run an experiment
+bun examples/autoresearch/research.js run --tag "increase depth to 6"
+
+# Show last result
+bun examples/autoresearch/research.js last
+
+# Show experiment history
+bun examples/autoresearch/research.js status
+
+# Show best configuration
+bun examples/autoresearch/research.js best
+```
+
+Results are logged to both `results/experiments.json` (machine-readable) and `results/research_log.md` (human-readable).
+
+### Files
+
+| File | Modifiable | Purpose |
+|------|-----------|---------|
+| `model.js` | Yes | Model architecture |
+| `train.js` | Yes | Training loop, optimizer, hyperparameters |
+| `data.js` | No | Data loading, BPB evaluation |
+| `prepare.js` | No | Data preparation |
+| `research.js` | No | Experiment runner and tracking |
+| `CLAUDE.md` | No | Agent instructions |
