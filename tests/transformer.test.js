@@ -152,6 +152,64 @@ test('tiny GPT forward produces logits of correct shape', () => {
   expect(logits.data.shape).toEqual([4, 32])
 })
 
+// --- Finite-difference gradient checks for layernorm and softmax ---
+
+function numGradCheck(makeLoss, x, tol = 1e-3) {
+  const eps = 1e-4
+  smith.zeroGrad([x])
+  const loss = makeLoss(x)
+  smith.backward(loss)
+  const analyticGrad = Array.from(x.grad.data)
+
+  const xData = x.data.data
+  for (let i = 0; i < xData.length; i++) {
+    const orig = xData[i]
+    xData[i] = orig + eps
+    const lossPlus = smith.noGrad(() => smith.toArray(makeLoss(x).data))
+    xData[i] = orig - eps
+    const lossMinus = smith.noGrad(() => smith.toArray(makeLoss(x).data))
+    xData[i] = orig
+
+    const numGrad = (lossPlus - lossMinus) / (2 * eps)
+    expect(Math.abs(analyticGrad[i] - numGrad)).toBeLessThan(tol)
+  }
+}
+
+test('finite-diff: layernorm input gradient (4x8)', () => {
+  const rows = 4, cols = 8
+  const xData = Array.from({ length: rows * cols }, () => Math.random() * 2 - 1)
+  const x = smith.variable(smith.tensor(xData, [rows, cols]), { requiresGrad: true })
+  const gamma = smith.variable(smith.tensor(Array.from({ length: cols }, () => 1 + Math.random() * 0.5), [cols]))
+  const beta = smith.variable(smith.tensor(Array.from({ length: cols }, () => Math.random() * 0.1), [cols]))
+  numGradCheck(v => smith.sum(smith.layernorm(v, gamma, beta)), x, 5e-3)
+})
+
+test('finite-diff: layernorm gamma gradient (4x8)', () => {
+  const rows = 4, cols = 8
+  const xData = Array.from({ length: rows * cols }, () => Math.random() * 2 - 1)
+  const x = smith.variable(smith.tensor(xData, [rows, cols]))
+  const gamma = smith.variable(smith.tensor(Array.from({ length: cols }, () => 1 + Math.random() * 0.5), [cols]), { requiresGrad: true })
+  const beta = smith.variable(smith.tensor(Array.from({ length: cols }, () => Math.random() * 0.1), [cols]))
+  numGradCheck(v => smith.sum(smith.layernorm(x, v, beta)), gamma, 5e-3)
+})
+
+test('finite-diff: softmax backward (4x16)', () => {
+  const rows = 4, cols = 16
+  const xData = Array.from({ length: rows * cols }, () => Math.random() * 3 - 1)
+  const x = smith.variable(smith.tensor(xData, [rows, cols]), { requiresGrad: true })
+  // Use a weighted sum so gradient isn't trivially zero
+  const weights = smith.variable(smith.tensor(Array.from({ length: rows * cols }, () => Math.random()), [rows, cols]))
+  numGradCheck(v => smith.sum(smith.mul(smith.softmax(v, -1), weights)), x, 5e-3)
+})
+
+test('finite-diff: cross-entropy gradient (8x32)', () => {
+  const batch = 8, vocab = 32
+  const xData = Array.from({ length: batch * vocab }, () => Math.random() * 4 - 2)
+  const targets = Array.from({ length: batch }, () => Math.floor(Math.random() * vocab))
+  const x = smith.variable(smith.tensor(xData, [batch, vocab]), { requiresGrad: true })
+  numGradCheck(v => smith.crossEntropy(v, targets), x, 5e-3)
+})
+
 test('tiny GPT training step reduces loss', () => {
   const model = smith.createModel({ vocabSize: 32, numLayers: 1, numHeads: 2, dim: 16, maxSeqLen: 8 })
   const params = smith.modelParams(model)

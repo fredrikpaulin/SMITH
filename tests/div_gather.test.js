@@ -253,6 +253,102 @@ describe('round-trip', () => {
 // Combined: div + gather in one autograd pipeline
 // ============================================================
 
+// ============================================================
+// Larger-scale GPU tests
+// ============================================================
+
+describe('large scale GPU', () => {
+  test('gather + scatter_add round trip (256 elements)', () => {
+    const N = 256
+    const data = Array.from({ length: N }, () => Math.random() * 100)
+    const input = T.tensor(data, [N])
+    // Gather all odd indices, scatter them back
+    const indices = Array.from({ length: N / 2 }, (_, i) => i * 2 + 1)
+    const gathered = gather(input, 0, indices)
+    expect(gathered.shape).toEqual([N / 2])
+
+    const dst = T.zeros([N])
+    scatterAdd(dst, 0, indices, gathered)
+    const result = f(dst)
+    for (let i = 0; i < N; i++) {
+      if (i % 2 === 1) {
+        expect(Math.abs(result[i] - data[i])).toBeLessThan(1e-3)
+      } else {
+        expect(result[i]).toBe(0)
+      }
+    }
+  })
+
+  test('2D gather + scatter_add round trip (64x8)', () => {
+    const rows = 64, cols = 8
+    const data = Array.from({ length: rows * cols }, () => Math.random() * 10)
+    const input = T.tensor(data, [rows, cols])
+    // Gather every 4th row
+    const indices = Array.from({ length: rows / 4 }, (_, i) => i * 4)
+    const gathered = gather(input, 0, indices)
+    expect(gathered.shape).toEqual([rows / 4, cols])
+
+    const dst = T.zeros([rows, cols])
+    scatterAdd(dst, 0, indices, gathered)
+    const result = f(dst)
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const idx = r * cols + c
+        if (r % 4 === 0) {
+          expect(Math.abs(result[idx] - data[idx])).toBeLessThan(1e-3)
+        } else {
+          expect(result[idx]).toBe(0)
+        }
+      }
+    }
+  })
+
+  test('div finite-diff gradient (64 elements)', () => {
+    const N = 64, eps = 1e-4
+    const aData = Array.from({ length: N }, () => Math.random() * 5 + 1)
+    const bData = Array.from({ length: N }, () => Math.random() * 3 + 0.5) // avoid near-zero
+    const a = smith.variable(smith.tensor(aData, [N]), { requiresGrad: true })
+    const b = smith.variable(smith.tensor(bData, [N]))
+
+    smith.zeroGrad([a])
+    const loss = smith.sum(smith.div(a, b))
+    smith.backward(loss)
+    const analyticGrad = Array.from(a.grad.data)
+
+    // Spot-check 10 positions
+    const ad = a.data.data
+    for (let trial = 0; trial < 10; trial++) {
+      const i = Math.floor(Math.random() * N)
+      const orig = ad[i]
+      ad[i] = orig + eps
+      const lPlus = smith.noGrad(() => smith.toArray(smith.sum(smith.div(a, b)).data))
+      ad[i] = orig - eps
+      const lMinus = smith.noGrad(() => smith.toArray(smith.sum(smith.div(a, b)).data))
+      ad[i] = orig
+      const numGrad = (lPlus - lMinus) / (2 * eps)
+      expect(Math.abs(analyticGrad[i] - numGrad)).toBeLessThan(1e-3)
+    }
+  })
+
+  test('gather autograd backward (128 elements, 32 indices)', () => {
+    const N = 128, K = 32
+    const data = Array.from({ length: N }, () => Math.random() * 10)
+    const indices = Array.from({ length: K }, () => Math.floor(Math.random() * N))
+    const w = smith.variable(smith.tensor(data, [N]), { requiresGrad: true })
+    const out = smith.gather(w, 0, indices)
+    const loss = smith.sum(out)
+    smith.backward(loss)
+
+    // Each index i should accumulate count(i in indices) as its gradient
+    const grad = Array.from(w.grad.data)
+    const counts = new Float32Array(N)
+    for (const idx of indices) counts[idx]++
+    for (let i = 0; i < N; i++) {
+      expect(Math.abs(grad[i] - counts[i])).toBeLessThan(1e-3)
+    }
+  })
+})
+
 describe('combined pipeline', () => {
   test('div then gather backward', () => {
     const a = smith.variable(smith.tensor([6, 10, 15, 20], [4]), { requiresGrad: true })

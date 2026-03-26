@@ -113,3 +113,69 @@ test('zeroGrad clears gradients', () => {
   smith.zeroGrad([x])
   expect(x.grad).toBeNull()
 })
+
+// --- Finite-difference gradient verification (GPU) ---
+
+// Numerically check dL/dx by perturbing each element of x and measuring loss change.
+// This verifies the GPU backward pass against the GPU forward pass — no CPU mock needed.
+function numGradCheck(makeLoss, x, tol = 1e-3) {
+  const eps = 1e-4
+  // Analytical gradient
+  smith.zeroGrad([x])
+  const loss = makeLoss(x)
+  smith.backward(loss)
+  const analyticGrad = Array.from(x.grad.data)
+
+  // Numerical gradient: for each element, perturb ±eps and measure Δloss
+  const xData = x.data.data
+  for (let i = 0; i < xData.length; i++) {
+    const orig = xData[i]
+    xData[i] = orig + eps
+    const lossPlus = smith.noGrad(() => smith.toArray(makeLoss(x).data))
+    xData[i] = orig - eps
+    const lossMinus = smith.noGrad(() => smith.toArray(makeLoss(x).data))
+    xData[i] = orig
+
+    const numGrad = (lossPlus - lossMinus) / (2 * eps)
+    expect(Math.abs(analyticGrad[i] - numGrad)).toBeLessThan(tol)
+  }
+}
+
+test('finite-diff: relu backward (64 elements)', () => {
+  // Avoid values near 0 where relu's discontinuity breaks finite differences
+  const data = Array.from({ length: 64 }, () => {
+    let v; do { v = Math.random() * 4 - 2 } while (Math.abs(v) < 0.1)
+    return v
+  })
+  const x = smith.variable(smith.tensor(data, [64]), { requiresGrad: true })
+  numGradCheck(v => smith.sum(smith.relu(v)), x, 5e-3)
+})
+
+test('finite-diff: gelu backward (64 elements)', () => {
+  const data = Array.from({ length: 64 }, () => Math.random() * 4 - 2)
+  const x = smith.variable(smith.tensor(data, [64]), { requiresGrad: true })
+  numGradCheck(v => smith.sum(smith.gelu(v)), x, 0.01)
+})
+
+test('finite-diff: mul chain backward (32 elements)', () => {
+  const data = Array.from({ length: 32 }, () => Math.random() * 2 + 0.5)
+  const x = smith.variable(smith.tensor(data, [32]), { requiresGrad: true })
+  const c = smith.variable(smith.tensor(data.map(() => Math.random() * 2), [32]))
+  numGradCheck(v => smith.sum(smith.mul(v, c)), x)
+})
+
+test('finite-diff: matmul backward (16x16)', () => {
+  const N = 16
+  const aData = Array.from({ length: N * N }, () => Math.random() - 0.5)
+  const bData = Array.from({ length: N * N }, () => Math.random() - 0.5)
+  const a = smith.variable(smith.tensor(aData, [N, N]), { requiresGrad: true })
+  const b = smith.variable(smith.tensor(bData, [N, N]))
+  numGradCheck(v => smith.sum(smith.matmul(v, b)), a, 0.01)
+})
+
+test('finite-diff: scale + add chain (64 elements)', () => {
+  const data = Array.from({ length: 64 }, () => Math.random() * 3 - 1)
+  const x = smith.variable(smith.tensor(data, [64]), { requiresGrad: true })
+  const bias = smith.variable(smith.tensor(data.map(() => Math.random()), [64]))
+  numGradCheck(v => smith.sum(smith.relu(smith.add(smith.scale(v, 2.5), bias))), x, 0.02)
+})

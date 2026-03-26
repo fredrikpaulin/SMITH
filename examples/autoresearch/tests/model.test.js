@@ -222,3 +222,113 @@ test('window sizes follow SSSL pattern', () => {
   expect(model.windowSizes[2]).toBe(half)
   expect(model.windowSizes[3]).toBe(cfg.seqLen)  // last always full
 })
+
+// --- After one step, projections are non-zero and ALL params get gradients ---
+
+test('full gradient flow after one optimizer step', () => {
+  const model = createModel(smallConfig)
+  initWeights(model)
+  const opt = setupOptimizer(model, { matrixLr: 0.01, weightDecay: 0.0 })
+  const params = allParams(model)
+
+  const tokens = Array.from({ length: 8 }, (_, i) => i % 64)
+  const targets = Array.from({ length: 8 }, (_, i) => (i + 1) % 64)
+
+  // Step 0: projections are zero, only some params get grads
+  const { loss: loss0 } = forward(model, tokens, targets)
+  smith.backward(loss0)
+  smith.muonAdamWStep(opt)
+  smith.zeroGrad(params)
+
+  // Step 1: projections are now non-zero — all params should get grads
+  const { loss: loss1 } = forward(model, tokens, targets)
+  smith.backward(loss1)
+
+  // Every param with requiresGrad should now have non-zero gradient
+  for (const p of params) {
+    if (p.grad) {
+      const g = flat(p.grad)
+      const hasNonZero = g.some(v => v !== 0)
+      expect(hasNonZero).toBe(true)
+      for (const v of g) expect(isFinite(v)).toBe(true)
+    }
+  }
+})
+
+// --- GQA: fewer KV heads than Q heads ---
+
+test('GQA forward and backward (nKVHead < nHead)', () => {
+  const gqaConfig = {
+    seqLen: 32,
+    vocabSize: 64,
+    nLayer: 2,
+    nHead: 4,
+    nKVHead: 2,     // 2 KV heads shared across 4 Q heads
+    nEmbd: 64,
+    windowPattern: 'SL',
+  }
+  const model = createModel(gqaConfig)
+  initWeights(model)
+
+  // Forward should work with GQA
+  const tokens = Array.from({ length: 8 }, () => Math.floor(Math.random() * 64))
+  const targets = Array.from({ length: 8 }, () => Math.floor(Math.random() * 64))
+  const { logits, loss } = forward(model, tokens, targets)
+
+  expect(logits.data.shape).toEqual([8, 64])
+  const lossVal = loss.data.data[0]
+  expect(isFinite(lossVal)).toBe(true)
+  expect(lossVal).toBeGreaterThan(0)
+
+  // Backward should produce finite gradients
+  smith.backward(loss)
+  const params = allParams(model)
+  for (const p of params) {
+    if (p.grad) {
+      const g = flat(p.grad)
+      for (const v of g) expect(isFinite(v)).toBe(true)
+    }
+  }
+
+  // Verify shapes: cK/cV should use kvDim = nKVHead * headDim = 2 * 16 = 32
+  const headDim = 64 / 4  // nEmbd / nHead = 16
+  expect(model.blocks[0].cK.data.shape).toEqual([64, 32])  // [nEmbd, nKVHead*headDim]
+  expect(model.blocks[0].cQ.data.shape).toEqual([64, 64])  // [nEmbd, nHead*headDim]
+})
+
+// --- Edge case: T=1 (single token) ---
+
+test('forward with single token (T=1)', () => {
+  const model = createModel(smallConfig)
+  initWeights(model)
+
+  const { logits } = forward(model, [42])
+  expect(logits.data.shape).toEqual([1, 64])
+
+  const vals = flat(logits.data)
+  for (const v of vals) expect(isFinite(v)).toBe(true)
+})
+
+// --- Edge case: T=seqLen (full sequence length) ---
+
+test('forward with full sequence length (T=seqLen)', () => {
+  const model = createModel(smallConfig)
+  initWeights(model)
+
+  const tokens = Array.from({ length: smallConfig.seqLen }, () => Math.floor(Math.random() * 64))
+  const targets = Array.from({ length: smallConfig.seqLen }, () => Math.floor(Math.random() * 64))
+  const { logits, loss } = forward(model, tokens, targets)
+
+  expect(logits.data.shape).toEqual([smallConfig.seqLen, 64])
+  expect(isFinite(loss.data.data[0])).toBe(true)
+
+  // Backward at full seqLen should work
+  smith.backward(loss)
+  const params = allParams(model)
+  for (const p of params) {
+    if (p.grad) {
+      const g = flat(p.grad)
+      for (const v of g) expect(isFinite(v)).toBe(true)
+    }
+  }
+})

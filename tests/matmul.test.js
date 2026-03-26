@@ -68,3 +68,81 @@ test('matmul backward (gradient check)', () => {
   // dL/dB = [[1+3, 1+3], [2+4, 2+4]] = [[4, 4], [6, 6]]
   expectClose(smith.toArray(vb.grad), [[4, 4], [6, 6]])
 })
+
+// --- Larger GPU-verified matmul tests ---
+
+test('64x64 matmul: A @ I = A', () => {
+  const N = 64
+  const aData = Array.from({ length: N * N }, () => Math.random() * 2 - 1)
+  const eyeData = new Float32Array(N * N)
+  for (let i = 0; i < N; i++) eyeData[i * N + i] = 1
+  const va = smith.variable(smith.tensor(aData, [N, N]))
+  const ve = smith.variable(smith.tensor(Array.from(eyeData), [N, N]))
+  const result = smith.matmul(va, ve)
+  const resultArr = Array.from(result.data.data)
+  for (let i = 0; i < N * N; i++) {
+    expect(Math.abs(resultArr[i] - aData[i])).toBeLessThan(1e-2)
+  }
+})
+
+test('non-square matmul: [32x64] @ [64x16]', () => {
+  const M = 32, K = 64, N = 16
+  const aData = Array.from({ length: M * K }, () => Math.random() - 0.5)
+  const bData = Array.from({ length: K * N }, () => Math.random() - 0.5)
+  const va = smith.variable(smith.tensor(aData, [M, K]))
+  const vb = smith.variable(smith.tensor(bData, [K, N]))
+  const vc = smith.matmul(va, vb)
+  expect(vc.data.shape).toEqual([M, N])
+
+  // Verify one random row/col dot product on CPU
+  const result = Array.from(vc.data.data)
+  const r = 7, c = 3
+  let expected = 0
+  for (let k = 0; k < K; k++) expected += aData[r * K + k] * bData[k * N + c]
+  expect(Math.abs(result[r * N + c] - expected)).toBeLessThan(1e-3)
+})
+
+test('matmul associativity: (A@B)@C ≈ A@(B@C)', () => {
+  const N = 32
+  const rand = () => Array.from({ length: N * N }, () => Math.random() - 0.5)
+  const vA = smith.variable(smith.tensor(rand(), [N, N]))
+  const vB = smith.variable(smith.tensor(rand(), [N, N]))
+  const vC = smith.variable(smith.tensor(rand(), [N, N]))
+
+  const left = smith.matmul(smith.matmul(vA, vB), vC)   // (A@B)@C
+  const right = smith.matmul(vA, smith.matmul(vB, vC))  // A@(B@C)
+
+  const l = Array.from(left.data.data)
+  const r = Array.from(right.data.data)
+  for (let i = 0; i < l.length; i++) {
+    expect(Math.abs(l[i] - r[i])).toBeLessThan(1e-2) // f32 accumulation diverges slightly
+  }
+})
+
+test('matmul backward finite-diff (16x16)', () => {
+  const N = 16
+  const eps = 1e-4
+  const aData = Array.from({ length: N * N }, () => Math.random() - 0.5)
+  const bData = Array.from({ length: N * N }, () => Math.random() - 0.5)
+  const a = smith.variable(smith.tensor(aData, [N, N]), { requiresGrad: true })
+  const b = smith.variable(smith.tensor(bData, [N, N]))
+
+  // Analytical gradient
+  const loss = smith.sum(smith.matmul(a, b))
+  smith.backward(loss)
+  const analyticGrad = Array.from(a.grad.data)
+
+  // Spot-check 10 random positions via finite differences
+  const xData = a.data.data
+  for (let trial = 0; trial < 10; trial++) {
+    const i = Math.floor(Math.random() * N * N)
+    const orig = xData[i]
+    xData[i] = orig + eps
+    const lPlus = smith.noGrad(() => smith.toArray(smith.sum(smith.matmul(a, b)).data))
+    xData[i] = orig - eps
+    const lMinus = smith.noGrad(() => smith.toArray(smith.sum(smith.matmul(a, b)).data))
+    xData[i] = orig
+    const numGrad = (lPlus - lMinus) / (2 * eps)
+    expect(Math.abs(analyticGrad[i] - numGrad)).toBeLessThan(0.01)
+  }
+})

@@ -184,6 +184,64 @@ test('conv1d GPU col2im matches expected — stride 1 no padding', () => {
   expect(x.grad.data[3]).toBeCloseTo(1.0)
 })
 
+test('finite-diff: conv1d multi-channel weight gradient', () => {
+  const cIn = 3, cOut = 4, len = 12, k = 3
+  const eps = 1e-4
+
+  const xData = Array.from({ length: cIn * len }, () => Math.random() - 0.5)
+  const wData = Array.from({ length: cOut * cIn * k }, () => (Math.random() - 0.5) * 0.2)
+  const x = variable(tensor(xData, [cIn, len]), { requiresGrad: false })
+  const w = variable(tensor(wData, [cOut, cIn, k]), { requiresGrad: true })
+
+  // Analytical gradient
+  smith.zeroGrad([w])
+  const loss = smith.sum(conv1d(x, w, null, { stride: 1, padding: 1 }))
+  backward(loss)
+  const analyticGrad = Array.from(w.grad.data)
+
+  // Spot-check 15 random weight positions
+  const wd = w.data.data
+  for (let trial = 0; trial < 15; trial++) {
+    const i = Math.floor(Math.random() * wd.length)
+    const orig = wd[i]
+    wd[i] = orig + eps
+    const lPlus = smith.noGrad(() => smith.toArray(smith.sum(conv1d(x, w, null, { stride: 1, padding: 1 })).data))
+    wd[i] = orig - eps
+    const lMinus = smith.noGrad(() => smith.toArray(smith.sum(conv1d(x, w, null, { stride: 1, padding: 1 })).data))
+    wd[i] = orig
+    const numGrad = (lPlus - lMinus) / (2 * eps)
+    expect(Math.abs(analyticGrad[i] - numGrad)).toBeLessThan(5e-3)
+  }
+})
+
+test('finite-diff: conv1d multi-channel input gradient (stride 2, padding 1)', () => {
+  const cIn = 2, cOut = 3, len = 10, k = 3
+  const eps = 1e-4
+
+  const xData = Array.from({ length: cIn * len }, () => Math.random() - 0.5)
+  const wData = Array.from({ length: cOut * cIn * k }, () => (Math.random() - 0.5) * 0.2)
+  const x = variable(tensor(xData, [cIn, len]), { requiresGrad: true })
+  const w = variable(tensor(wData, [cOut, cIn, k]), { requiresGrad: false })
+
+  smith.zeroGrad([x])
+  const loss = smith.sum(conv1d(x, w, null, { stride: 2, padding: 1 }))
+  backward(loss)
+  const analyticGrad = Array.from(x.grad.data)
+
+  const xd = x.data.data
+  for (let trial = 0; trial < 15; trial++) {
+    const i = Math.floor(Math.random() * xd.length)
+    const orig = xd[i]
+    xd[i] = orig + eps
+    const lPlus = smith.noGrad(() => smith.toArray(smith.sum(conv1d(x, w, null, { stride: 2, padding: 1 })).data))
+    xd[i] = orig - eps
+    const lMinus = smith.noGrad(() => smith.toArray(smith.sum(conv1d(x, w, null, { stride: 2, padding: 1 })).data))
+    xd[i] = orig
+    const numGrad = (lPlus - lMinus) / (2 * eps)
+    expect(Math.abs(analyticGrad[i] - numGrad)).toBeLessThan(5e-3)
+  }
+})
+
 test('conv1d Whisper encoder shapes', () => {
   noGrad(() => {
     // Whisper tiny: conv1(80→384, k=3, s=1, p=1) then conv2(384→384, k=3, s=2, p=1)
