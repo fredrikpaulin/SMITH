@@ -9,3 +9,5 @@ pr/
 CLAUDE.md
 ARCHITECTURE.md
 models/*
+!models/registry.json
+!models/registry.schema.json

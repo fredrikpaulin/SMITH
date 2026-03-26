@@ -451,3 +451,76 @@ smith.disableProfiling()
 | `memorySnapshot` | `() → { allocatedBytes }` | Current GPU memory allocation |
 
 Benchmark options: `{ warmup, iterations }` — defaults: `3`, `10`.
+
+## Model Registry
+
+Fetch, cache, and manage model files. Models are stored in `models/<id>/` with metadata in `models/registry.json`.
+
+```js
+import smith from './src/index.js'
+
+// List available models
+const models = smith.listModels()
+// [{ id: 'whisper-tiny', format: 'ggml', cached: false, ... }, ...]
+
+// Download a registered model
+const result = await smith.fetchModel('whisper-tiny', {
+  onProgress: (file, downloaded, total) => {
+    console.log(`${file}: ${(downloaded / total * 100).toFixed(1)}%`)
+  },
+})
+// result = { id: 'whisper-tiny', path: 'models/whisper-tiny', files: ['ggml-tiny.bin'] }
+
+// Resolve local path (null if not cached)
+const path = smith.modelPath('whisper-tiny')
+
+// Fetch from a direct URL (no registry entry needed)
+const { path: p } = await smith.fetchUrl('https://example.com/weights.bin', {
+  id: 'my-model',
+  sha256: 'abc123...',
+})
+
+// Register a custom model
+smith.registerModel('my-custom-model', {
+  repo: 'myorg/my-model',
+  format: 'safetensors',
+  description: 'My fine-tuned model',
+  loader: 'safetensors',
+  files: [{ name: 'model.safetensors', sha256: '...' }],
+})
+```
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `listModels` | `()` | List all registry entries with cache status |
+| `getModel` | `(id)` | Get single registry entry (null if unknown) |
+| `modelPath` | `(id, filename?)` | Local path to model file (null if not cached) |
+| `modelPaths` | `(id)` | All file paths for a model |
+| `fetchModel` | `(id, opts?)` | Download registered model, verify checksums |
+| `fetchUrl` | `(url, opts?)` | Download from direct URL into models dir |
+| `registerModel` | `(id, entry)` | Add/update model in registry.json |
+| `removeModel` | `(id)` | Delete cached model files from disk |
+| `modelsDir` | `()` | Path to the models directory |
+| `reloadRegistry` | `()` | Force re-read of registry.json |
+| `hashFile` | `(path)` | SHA-256 hash a file (streaming) |
+
+fetchModel options: `{ onProgress, force, revision }`. fetchUrl options: `{ id, filename, sha256, onProgress, force }`.
+
+### Registry Schema
+
+Each model entry in `models/registry.json`:
+
+```json
+{
+  "repo": "ggerganov/whisper.cpp",
+  "format": "ggml",
+  "description": "Whisper tiny — 39M params",
+  "loader": "whisper",
+  "variant": "resnet50",
+  "files": [
+    { "name": "ggml-tiny.bin", "sha256": "...", "url": "..." }
+  ]
+}
+```
+
+Fields: `repo` (HF repo ID), `format` (gguf/ggml/safetensors/binary), `loader` (which Smith loader), `variant` (passed to loader), `files` (array with name, optional sha256 and direct url).

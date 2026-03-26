@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "smith-model-registry",
+  "title": "Smith Model Registry",
+  "type": "object",
+  "required": ["models"],
+  "properties": {
+    "models": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["format", "description", "files"],
+        "properties": {
+          "repo": {
+            "type": "string",
+            "description": "Hugging Face repo ID (e.g. openai/clip-vit-base-patch32)"
+          },
+          "format": {
+            "type": "string",
+            "enum": ["gguf", "ggml", "safetensors", "binary"],
+            "description": "Weight file format"
+          },
+          "description": {
+            "type": "string",
+            "description": "Human-readable model description"
+          },
+          "loader": {
+            "type": "string",
+            "enum": ["gguf", "whisper", "resnet", "clip", "safetensors"],
+            "description": "Which Smith loader to use"
+          },
+          "variant": {
+            "type": "string",
+            "description": "Model variant passed to the loader (e.g. resnet50, ViT-B/32)"
+          },
+          "revision": {
+            "type": "string",
+            "description": "HF repo revision/branch (default: main)"
+          },
+          "files": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["name"],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "Filename within the model directory"
+                },
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$",
+                  "description": "Expected SHA-256 checksum"
+                },
+                "url": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "Direct download URL (overrides HF repo resolution)"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

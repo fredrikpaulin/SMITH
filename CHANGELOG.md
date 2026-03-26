@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.21.0 — Model Registry and Fetcher (2026-03-26)
+
+### Added
+
+- **`src/models.js`** — Model registry, fetcher, and resolver. Downloads model files from Hugging Face Hub or direct URLs, verifies SHA-256 checksums, caches in `models/<id>/`. API: `listModels()`, `getModel(id)`, `modelPath(id)`, `fetchModel(id)`, `fetchUrl(url)`, `registerModel(id, entry)`, `removeModel(id)`.
+- **`models/registry.json`** — Declarative registry of known models: Whisper (tiny/base/small/medium), ResNet-18/50, CLIP ViT-B/32/B/16/L/14, Nemotron-4B Q4_K_M. Each entry declares HF repo, format, loader, variant, and file list with optional checksums.
+- **`models/registry.schema.json`** — JSON Schema (draft 2020-12) for validating registry entries.
+- **Tests** — 31 tests: registry reads, path resolution, HF URL building, SHA-256 hashing, model registration, removal, mock HTTP fetch with progress and checksum verification, schema validation.
+
 ## 0.20.0 — GPU FFT and Mel Spectrogram (2026-03-26)
 
 ### Added

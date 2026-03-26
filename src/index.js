@@ -50,6 +50,11 @@ import {
   profile, benchmark,
   memorySnapshot,
 } from './profile.js'
+import {
+  listModels, getModel, modelPath, modelPaths,
+  fetchModel, fetchUrl, registerModel, removeModel,
+  modelsDir, reloadRegistry, hashFile,
+} from './models.js'
 
 // Re-export tensor creation
 const { tensor, zeros, ones, full, rand, randn, scalar, toArray, toString: tensorToString } = T
@@ -196,6 +201,11 @@ const smith = {
   profileReport, resetProfile,
   profile, benchmark,
   memorySnapshot,
+
+  // Models
+  listModels, getModel, modelPath, modelPaths,
+  fetchModel, fetchUrl, registerModel, removeModel,
+  modelsDir, reloadRegistry, hashFile,
 }
 
 export default smith
@@ -247,4 +257,7 @@ export {
   profileReport, resetProfile,
   profile, benchmark,
   memorySnapshot,
+  listModels, getModel, modelPath, modelPaths,
+  fetchModel, fetchUrl, registerModel, removeModel,
+  modelsDir, reloadRegistry, hashFile,
 }

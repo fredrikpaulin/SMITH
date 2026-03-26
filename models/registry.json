@@ -1,0 +1,142 @@
+{
+  "$schema": "./registry.schema.json",
+  "models": {
+    "whisper-tiny": {
+      "repo": "ggerganov/whisper.cpp",
+      "format": "ggml",
+      "description": "Whisper tiny — 39M params, multilingual, 75 MB",
+      "loader": "whisper",
+      "files": [
+        {
+          "name": "ggml-tiny.bin"
+        }
+      ]
+    },
+    "whisper-tiny-en": {
+      "repo": "ggerganov/whisper.cpp",
+      "format": "ggml",
+      "description": "Whisper tiny.en — 39M params, English only, 75 MB",
+      "loader": "whisper",
+      "files": [
+        {
+          "name": "ggml-tiny.en.bin"
+        }
+      ]
+    },
+    "whisper-base": {
+      "repo": "ggerganov/whisper.cpp",
+      "format": "ggml",
+      "description": "Whisper base — 74M params, multilingual, 142 MB",
+      "loader": "whisper",
+      "files": [
+        {
+          "name": "ggml-base.bin"
+        }
+      ]
+    },
+    "whisper-base-en": {
+      "repo": "ggerganov/whisper.cpp",
+      "format": "ggml",
+      "description": "Whisper base.en — 74M params, English only, 142 MB",
+      "loader": "whisper",
+      "files": [
+        {
+          "name": "ggml-base.en.bin"
+        }
+      ]
+    },
+    "whisper-small": {
+      "repo": "ggerganov/whisper.cpp",
+      "format": "ggml",
+      "description": "Whisper small — 244M params, multilingual, 466 MB",
+      "loader": "whisper",
+      "files": [
+        {
+          "name": "ggml-small.bin"
+        }
+      ]
+    },
+    "whisper-medium": {
+      "repo": "ggerganov/whisper.cpp",
+      "format": "ggml",
+      "description": "Whisper medium — 769M params, multilingual, 1.5 GB",
+      "loader": "whisper",
+      "files": [
+        {
+          "name": "ggml-medium.bin"
+        }
+      ]
+    },
+    "resnet18": {
+      "repo": "nicholasKluge/ResNet-18",
+      "format": "safetensors",
+      "description": "ResNet-18 — ImageNet pretrained, torchvision format",
+      "loader": "resnet",
+      "variant": "resnet18",
+      "files": [
+        {
+          "name": "model.safetensors"
+        }
+      ]
+    },
+    "resnet50": {
+      "repo": "nicholasKluge/ResNet-50",
+      "format": "safetensors",
+      "description": "ResNet-50 — ImageNet pretrained, torchvision format",
+      "loader": "resnet",
+      "variant": "resnet50",
+      "files": [
+        {
+          "name": "model.safetensors"
+        }
+      ]
+    },
+    "clip-vit-b-32": {
+      "repo": "openai/clip-vit-base-patch32",
+      "format": "safetensors",
+      "description": "CLIP ViT-B/32 — OpenAI contrastive vision-language model",
+      "loader": "clip",
+      "variant": "ViT-B/32",
+      "files": [
+        {
+          "name": "model.safetensors"
+        }
+      ]
+    },
+    "clip-vit-b-16": {
+      "repo": "openai/clip-vit-base-patch16",
+      "format": "safetensors",
+      "description": "CLIP ViT-B/16 — OpenAI contrastive vision-language model",
+      "loader": "clip",
+      "variant": "ViT-B/16",
+      "files": [
+        {
+          "name": "model.safetensors"
+        }
+      ]
+    },
+    "clip-vit-l-14": {
+      "repo": "openai/clip-vit-large-patch14",
+      "format": "safetensors",
+      "description": "CLIP ViT-L/14 — OpenAI contrastive vision-language model, 428M params",
+      "loader": "clip",
+      "variant": "ViT-L/14",
+      "files": [
+        {
+          "name": "model.safetensors"
+        }
+      ]
+    },
+    "nemotron-4b-q4": {
+      "repo": "bartowski/NVIDIA-Nemotron3-Nano-4B-GGUF",
+      "format": "gguf",
+      "description": "Nemotron-3 Nano 4B Q4_K_M — hybrid attention+mamba, 2.7 GB",
+      "loader": "gguf",
+      "files": [
+        {
+          "name": "NVIDIA-Nemotron3-Nano-4B-Q4_K_M.gguf"
+        }
+      ]
+    }
+  }
+}
