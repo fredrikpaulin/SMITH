@@ -60,6 +60,7 @@ const {
   flashAttention,
   sum, reshape, transpose,
   embedding, addGrad,
+  conv1d, conv1dOutputSize,
   conv2d, maxPool2d, avgPool2d, batchnorm,
   createBatchNorm, convOutputSize,
   rope, rmsNorm, swiglu, precomputeRoPE,
@@ -77,8 +78,10 @@ const {
   createLinear, linear, linearParams,
   createCausalMask,
   createMultiHeadAttention, multiHeadAttention, multiHeadAttentionFlash, multiHeadAttentionCached,
+  multiHeadCrossAttention, multiHeadCrossAttentionCached,
   createTransformerBlock, transformerBlock, transformerBlockFlash, transformerBlockCached, blockParams,
   countParams,
+  sinusoidalPE,
 } = nn
 
 // Re-export model
@@ -118,8 +121,10 @@ const smith = {
   createLinear, linear, linearParams,
   createCausalMask,
   createMultiHeadAttention, multiHeadAttention, multiHeadAttentionFlash, multiHeadAttentionCached,
+  multiHeadCrossAttention, multiHeadCrossAttentionCached,
   createTransformerBlock, transformerBlock, transformerBlockFlash, transformerBlockCached, blockParams,
   countParams,
+  sinusoidalPE,
 
   // Model
   CONFIGS, createModel, forward, forwardFlash, forwardCached, modelParams, modelInfo,
@@ -162,6 +167,7 @@ const smith = {
   f16Mode, defaultDtype, cast, createLossScaler,
 
   // Conv / Pool / BatchNorm / Winograd
+  conv1d, conv1dOutputSize,
   conv2d, maxPool2d, avgPool2d, batchnorm,
   createBatchNorm, convOutputSize, poolOutputSize,
   winogradTransformWeights, canUseWinograd, shouldUseIm2col,
@@ -197,8 +203,10 @@ export {
   createLinear, linear, linearParams,
   createCausalMask,
   createMultiHeadAttention, multiHeadAttention, multiHeadAttentionFlash, multiHeadAttentionCached,
+  multiHeadCrossAttention, multiHeadCrossAttentionCached,
   createTransformerBlock, transformerBlock, transformerBlockFlash, transformerBlockCached, blockParams,
   countParams,
+  sinusoidalPE,
   CONFIGS, createModel, forward, forwardFlash, forwardCached, modelParams, modelInfo,
   tokenizer,
   generate, generateCached, topKPredictions,
@@ -216,6 +224,7 @@ export {
   loadGGUF, parseGGUF, listGGUFTensors, extractGGUFConfig,
   createGGUFCache, resetGGUFCache, generateGGUF,
   matmulQ8,
+  conv1d, conv1dOutputSize,
   conv2d, maxPool2d, avgPool2d, batchnorm,
   createBatchNorm, convOutputSize, poolOutputSize,
   winogradTransformWeights, canUseWinograd, shouldUseIm2col,

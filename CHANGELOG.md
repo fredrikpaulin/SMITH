@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.17.0 — Conv1d, Cross-Attention, Sinusoidal PE (2026-03-26)
+
+### Added
+
+- **Conv1d** (`conv1d(input, weight, bias, opts)`) — 1D convolution with full autograd backward. Input `[C_in, length]`, weight `[C_out, C_in, kernel]`. Im2col + matmul strategy matching conv2d's approach. Options: `{ stride, padding }`. `conv1dOutputSize()` utility.
+- **Cross-attention** (`multiHeadCrossAttention(x, kv, layer, mask?)`) — Q from one source, K/V from another. Reuses `createMultiHeadAttention` structure. Essential for encoder-decoder architectures (Whisper, T5, BART).
+- **Cached cross-attention** (`multiHeadCrossAttentionCached(x, encoderKV, layer)`) — Pre-computed encoder K/V projections for efficient autoregressive decoding.
+- **Sinusoidal PE** (`sinusoidalPE(maxLen, dim)`) — Fixed positional embeddings using sin/cos at geometrically-spaced frequencies. Returns raw tensor (not variable).
+- **Tests** — 11 conv1d tests (shapes, known values, backward gradients), 12 cross-attention/sinusoidal PE tests.
+
+### Changed
+
+- **Whisper example** (`examples/whisper/model.js`) rewritten to use Smith's core `conv1d`, `multiHeadCrossAttention`, `sinusoidalPE`, and `createCausalMask` instead of local implementations. Weight loader maps updated to match Smith's MHA structure (`qProj.weight`, `kProj.weight`, etc.).
+
+## 0.16.2 — Whisper Example Project (2026-03-26)
+
+### Added
+
+- **Whisper speech-to-text example** (`examples/whisper/`) — Complete Whisper implementation as a CLI application, demonstrating Smith's encoder-decoder transformer, cross-attention, and GGML model loading.
+  - **WAV audio decoder** (`audio.js`) — Pure JS WAV reader supporting PCM int8/int16/int32 and IEEE float. Includes linear interpolation resampler to 16kHz mono.
+  - **Mel spectrogram** (`mel.js`) — Pure JS radix-2 FFT, STFT with Hann window, and mel filterbank. Matches whisper.cpp's log-mel normalization (80 or 128 bins).
+  - **Whisper model** (`model.js`) — Encoder-decoder transformer with Conv1d (via im2col+matmul), sinusoidal positional embeddings, self-attention, cross-attention, and greedy/temperature decoding.
+  - **GGML loader** (`loader.js`, `ggml_parser.js`) — Reads whisper.cpp `.bin` files (magic `0x67676d6c`): hparams, mel filters, BPE vocab, and tensor data with F32/F16/Q8_0 dequantization.
+  - **Tokenizer** (`tokenizer.js`) — GPT-2 byte-level BPE decoder with Whisper special tokens (language, task, timestamps).
+  - **CLI** (`cli.js`) — `bun examples/whisper/cli.js --model ggml-tiny.bin --file audio.wav` with JSON/SRT/VTT output formats.
+  - **Tests** — 25 tests across audio, mel, tokenizer, and GGML parser (non-GPU tests run anywhere, model tests require macOS + Apple Silicon).
+
 ## 0.16.1 — GGUF Parser Fixes and K-Quant Dequantization (2026-03-25)
 
 ### Fixed

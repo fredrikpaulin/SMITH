@@ -442,18 +442,27 @@ describe('generateGGUF', () => {
 
   test('stops on EOS token', () => {
     const model = createTinyLlama()
-    // Force the model to always predict token 0 by zeroing lmHead then biasing token 0
     const vocabSize = model.config.vocabSize
     const dim = model.config.dim
-    model.lmHead.data.data.fill(0)
+    const eosToken = 5
+
+    // Bias lmHead so eosToken always wins argmax regardless of hidden state sign.
+    // Non-EOS columns get large negative weights → negative logits.
+    // EOS column gets large positive weights → positive logits.
     for (let d = 0; d < dim; d++) {
-      model.lmHead.data.data[d * vocabSize + 0] = 1000  // token 0 logit overwhelms everything
+      for (let v = 0; v < vocabSize; v++) {
+        model.lmHead.data.data[d * vocabSize + v] = v === eosToken ? 1000 : -1000
+      }
     }
 
-    const result = generateGGUF(model, [1], { maxTokens: 10, temperature: 0, eosToken: 0 })
+    // First verify the model actually predicts the biased token
+    const check = generateGGUF(model, [1], { maxTokens: 1, temperature: 0 })
+    expect(check[check.length - 1]).toBe(eosToken)
+
+    const result = generateGGUF(model, [1], { maxTokens: 10, temperature: 0, eosToken })
     // Must stop before maxTokens and last token must be EOS
     expect(result.length).toBeLessThan(1 + 10)  // stopped early (prompt + fewer than maxTokens)
-    expect(result[result.length - 1]).toBe(0)
+    expect(result[result.length - 1]).toBe(eosToken)
   })
 
   test('calls onToken callback', () => {

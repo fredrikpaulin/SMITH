@@ -47,6 +47,10 @@ All ops return new Variables with backward functions.
 
 **Shape:** `reshape(a, shape)`, `transpose(a, axes?)`
 
+**Conv1d:** `conv1d(input, weight, bias, opts?)` — 1D convolution with full autograd. Input `[C_in, length]`, weight `[C_out, C_in, kernel]`, bias `[C_out]` or null. Options: `{ stride, padding }`. Uses im2col + matmul internally.
+
+`conv1dOutputSize(length, kernelSize, stride, padding)` — compute output length.
+
 **Loss:** `crossEntropy(logits, targets)` — logits: `[batch, vocab]`, targets: int array
 
 **Embedding:** `embedding(indices, weight)` — CPU gather, GPU scatter-add backward
@@ -77,8 +81,11 @@ const norm = clipGradNorm(params, maxNorm)
 | `linear(x, layer)` | Forward pass |
 | `createMultiHeadAttention(dim, heads)` | MHA with Q/K/V/out projections |
 | `multiHeadAttention(x, layer, mask)` | Forward with causal mask |
+| `multiHeadCrossAttention(x, kv, layer, mask?)` | Cross-attention: Q from x, K/V from kv |
+| `multiHeadCrossAttentionCached(x, encoderKV, layer)` | Cross-attention with pre-computed K/V |
 | `multiHeadAttentionFlash(x, layer, causal?)` | Flash attention forward (O(n) memory) |
 | `multiHeadAttentionCached(x, layer, cache)` | Single-token forward, appends K/V to cache |
+| `sinusoidalPE(maxLen, dim)` | Sinusoidal positional embeddings (returns tensor, not variable) |
 | `createTransformerBlock(dim, heads, ffnDim?)` | Pre-norm block |
 | `transformerBlock(x, block, mask)` | Attention + FFN + residuals |
 | `transformerBlockFlash(x, block)` | Flash attention block (O(n) memory) |

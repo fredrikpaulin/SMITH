@@ -100,6 +100,56 @@ function multiHeadAttention(x, layer, mask) {
   return { output: linear(concatenated, layer.outProj) }
 }
 
+// --- Cross-attention ---
+// Q comes from x, K and V come from a separate source (e.g. encoder output).
+// Uses the same layer structure as self-attention.
+
+function multiHeadCrossAttention(x, kv, layer, mask) {
+  // x:  [seqLen, dim] — query source (decoder)
+  // kv: [kvLen, dim]  — key/value source (encoder output)
+  const seqLen = x.data.shape[0]
+  const kvLen = kv.data.shape[0]
+  const { numHeads, headDim, dim } = layer
+
+  const Q = linear(x, layer.qProj)
+  const K = linear(kv, layer.kProj)
+  const V = linear(kv, layer.vProj)
+
+  const Qh = A.transpose(A.reshape(Q, [seqLen, numHeads, headDim]), [1, 0, 2])
+  const Kh = A.transpose(A.reshape(K, [kvLen, numHeads, headDim]), [1, 0, 2])
+  const Vh = A.transpose(A.reshape(V, [kvLen, numHeads, headDim]), [1, 0, 2])
+
+  const { output: attnOut } = scaledDotProductAttention(Qh, Kh, Vh, mask)
+
+  const concatenated = A.reshape(A.transpose(attnOut, [1, 0, 2]), [seqLen, dim])
+  return { output: linear(concatenated, layer.outProj) }
+}
+
+// --- Cached cross-attention (for generation with pre-computed encoder output) ---
+
+function multiHeadCrossAttentionCached(x, encoderKV, layer) {
+  // x:  [1, dim] — single decoder token
+  // encoderKV: { k: [numHeads, kvLen, headDim], v: same } — pre-computed from encoder
+  const { numHeads, headDim, dim } = layer
+
+  const Q = linear(x, layer.qProj)
+  const Qh = A.transpose(A.reshape(Q, [1, numHeads, headDim]), [1, 0, 2])
+
+  // Attention: Q [H, 1, D] @ K^T [H, D, kvLen] → [H, 1, kvLen]
+  const scaleFactor = 1 / Math.sqrt(headDim)
+  const ndim = encoderKV.k.data.shape.length
+  const kAxes = []
+  for (let i = 0; i < ndim - 2; i++) kAxes.push(i)
+  kAxes.push(ndim - 1, ndim - 2)
+
+  const scores = A.scale(A.matmul(Qh, A.transpose(encoderKV.k, kAxes)), scaleFactor)
+  const weights = A.softmax(scores, -1)
+  const attnOut = A.matmul(weights, encoderKV.v)
+
+  const concatenated = A.reshape(A.transpose(attnOut, [1, 0, 2]), [1, dim])
+  return { output: linear(concatenated, layer.outProj) }
+}
+
 function mhaParams(layer) {
   return [
     ...linearParams(layer.qProj),
@@ -152,6 +202,22 @@ function countParams(params) {
   let total = 0
   for (const p of params) total += T.shapeSize(p.data.shape)
   return total
+}
+
+// --- Sinusoidal positional embedding ---
+// Used in the original Transformer, BERT, Whisper encoder.
+// Returns a tensor (not variable) of shape [maxLen, dim].
+
+function sinusoidalPE(maxLen, dim) {
+  const pe = new Float32Array(maxLen * dim)
+  for (let pos = 0; pos < maxLen; pos++) {
+    for (let i = 0; i < dim; i += 2) {
+      const angle = pos / Math.pow(10000, i / dim)
+      pe[pos * dim + i] = Math.sin(angle)
+      if (i + 1 < dim) pe[pos * dim + i + 1] = Math.cos(angle)
+    }
+  }
+  return T.tensor(Array.from(pe), [maxLen, dim])
 }
 
 // --- Flash multi-head attention ---
@@ -276,6 +342,8 @@ export {
   createCausalMask,
   scaledDotProductAttention,
   createMultiHeadAttention, multiHeadAttention, multiHeadAttentionFlash, multiHeadAttentionCached, mhaParams,
+  multiHeadCrossAttention, multiHeadCrossAttentionCached,
   createTransformerBlock, transformerBlock, transformerBlockFlash, transformerBlockCached, blockParams,
   countParams,
+  sinusoidalPE,
 }
