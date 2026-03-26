@@ -51,9 +51,24 @@ All ops return new Variables with backward functions.
 
 `conv1dOutputSize(length, kernelSize, stride, padding)` — compute output length.
 
+**FFT:** `fft(input)` — Differentiable FFT of real input `[n]`. Returns `{ re, im }` Variables. Backward via inverse FFT.
+
 **Loss:** `crossEntropy(logits, targets)` — logits: `[batch, vocab]`, targets: int array
 
 **Embedding:** `embedding(indices, weight)` — CPU gather, GPU scatter-add backward
+
+## FFT and Mel Spectrogram
+
+Low-level GPU FFT and mel spectrogram extraction. Useful for audio processing pipelines.
+
+| Function | Description |
+|----------|-------------|
+| `gpuFFT(input, n?)` | Forward FFT of real tensor. Returns `{ re, im }` tensors. Zero-pads to power of 2. |
+| `gpuIFFT(re, im, n?)` | Inverse FFT from complex. Returns real tensor. |
+| `gpuBatchFFT(complexIn, n, batch, inverse)` | Batch FFT on interleaved complex input. One FFT per batch. |
+| `gpuMelSpectrogram(samples, opts?)` | Full mel spectrogram pipeline. Returns `{ mel, nMels, numFrames }`. |
+
+`gpuMelSpectrogram` options: `{ nFft: 400, hopLength: 160, winLength: 400, nMels: 80, sampleRate: 16000 }`. Output matches whisper.cpp normalization.
 
 ## Optimizer
 

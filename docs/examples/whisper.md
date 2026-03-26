@@ -339,7 +339,7 @@ bun test examples/whisper/tests/
 - **WAV only.** No MP3, FLAC, or OGG decoding. Convert with FFmpeg.
 - **No word-level timestamps.** Output is a single text string. Whisper supports timestamps via special tokens, but decoding them requires token suppression logic not yet implemented.
 - **No voice activity detection.** The full audio is processed as one 30-second chunk.
-- **CPU mel spectrogram.** FFT and filterbank run on CPU. Fast enough for single files (~50ms) but a GPU FFT shader would help for batch processing.
+- **CPU mel spectrogram in example.** The example's `mel.js` uses CPU FFT. Smith now provides `gpuMelSpectrogram()` as a drop-in GPU alternative for batch processing.
 - **No streaming.** The entire audio file is loaded into memory and processed at once.
 
 ## Extending

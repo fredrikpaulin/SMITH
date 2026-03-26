@@ -26,6 +26,7 @@ import { ropeForward as gpuRopeFwd, ropeBackward as gpuRopeBwd, precomputeRoPE }
 import { rmsnormForward as gpuRmsnormFwd, rmsnormBackward as gpuRmsnormBwd } from './ops/rmsnorm.js'
 import { swigluForward as gpuSwigluFwd, swigluBackward as gpuSwigluBwd } from './ops/swiglu.js'
 import * as conv1dGpu from './ops/conv1d.js'
+import { gpuFFT as gpuFFTOp, gpuIFFT as gpuIFFTOp, gpuBatchFFT as gpuBatchFFTOp } from './ops/fft.js'
 
 let _noGrad = false
 
@@ -532,6 +533,59 @@ function swiglu(gate, up) {
   })
 }
 
+// --- FFT (differentiable) ---
+// Forward: FFT of real input → { re: Variable [n], im: Variable [n] }
+// Backward: DFT is a linear transform W. For real input x, X = Wx.
+//   d(loss)/d(x) = real( W^H @ (grad_re + i * grad_im) )
+//                = real( N * IFFT(grad_re + i * grad_im) )
+// We track re and im as separate Variables. Each backward contributes its part.
+// re backward: real(N * IFFT(grad_re + 0i)) = N * IFFT(grad_re).real
+// im backward: real(N * IFFT(0 + i*grad_im)) = N * (-IFFT(grad_im).im ... no)
+// Actually, for im backward: IFFT(i * g)[n] = (1/N) sum_k (i*g_k) * e^{2πikn/N}
+//   real part = (1/N) sum_k g_k * (-sin(2πkn/N)) = -Im(IFFT(g))
+//   So real(N * IFFT(i*g)) = -N * Im(IFFT(g))... but IFFT only returns real for real input.
+// Cleaner: use gpuBatchFFT for complex IFFT directly.
+
+function fft(input) {
+  const n = input.data.shape[0]
+  const { re, im } = gpuFFTOp(T.contiguous(input.data))
+
+  const reVar = variable(re, {
+    _deps: [input],
+    _backward: _noGrad ? null : (grad) => {
+      // IFFT of (grad_re + 0i), take real part, scale by N
+      const complexGrad = T.create([n * 2], input.data.dtype)
+      for (let i = 0; i < n; i++) {
+        complexGrad.data[i * 2] = grad.data[i]
+        complexGrad.data[i * 2 + 1] = 0
+      }
+      const ifftOut = gpuBatchFFTOp(complexGrad, n, 1, true) // inverse
+      // IFFT result real part * N (IFFT already divides by N, so multiply back)
+      const gradInput = T.create([n], input.data.dtype)
+      for (let i = 0; i < n; i++) gradInput.data[i] = ifftOut.data[i * 2] * n
+      addGrad(input, gradInput)
+    },
+  })
+
+  const imVar = variable(im, {
+    _deps: [input],
+    _backward: _noGrad ? null : (grad) => {
+      // IFFT of (0 + i*grad_im), take real part, scale by N
+      const complexGrad = T.create([n * 2], input.data.dtype)
+      for (let i = 0; i < n; i++) {
+        complexGrad.data[i * 2] = 0
+        complexGrad.data[i * 2 + 1] = grad.data[i]
+      }
+      const ifftOut = gpuBatchFFTOp(complexGrad, n, 1, true) // inverse
+      const gradInput = T.create([n], input.data.dtype)
+      for (let i = 0; i < n; i++) gradInput.data[i] = ifftOut.data[i * 2] * n
+      addGrad(input, gradInput)
+    },
+  })
+
+  return { re: reVar, im: imVar }
+}
+
 export {
   variable, param,
   backward, zeroGrad, noGrad,
@@ -543,6 +597,7 @@ export {
   transposeVar as transpose,
   embedding,
   addGrad,
+  fft,
   conv1d, conv1dOutputSize,
   conv2d, maxPool2d, avgPool2d, batchnorm,
   createBatchNorm, convOutputSize,

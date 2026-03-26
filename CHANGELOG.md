@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.20.0 — GPU FFT and Mel Spectrogram (2026-03-26)
+
+### Added
+
+- **`shaders/fft.metal`** — Radix-2 Cooley-Tukey FFT kernel using threadgroup shared memory. Single kernel (`fft_radix2`) handles both forward and inverse transforms. Supports FFT lengths up to 1024 (Metal threadgroup size limit). Bit-reversal permutation in-kernel. Batch mode: one threadgroup per independent FFT for STFT.
+- **`shaders/mel.metal`** — Four kernels for mel spectrogram extraction: `stft_window` (Hann window + interleaved complex), `stft_magnitude` (|FFT|² for positive bins), `mel_filterbank` (dense matmul), `mel_log` / `mel_normalize` (Whisper-style two-pass normalization).
+- **`src/ops/fft.js`** — GPU dispatch: `gpuFFT(input, n?)`, `gpuIFFT(re, im)`, `gpuBatchFFT(complexIn, n, batch, inverse)`.
+- **`src/ops/mel.js`** — GPU mel spectrogram pipeline: `gpuMelSpectrogram(samples, opts)` — window → batch FFT → magnitude → filterbank → log normalization. Matches CPU `melSpectrogram()` output.
+- **`fft(input)`** autograd op — Differentiable FFT returning `{ re, im }` Variables. Backward via inverse FFT. Enables spectral loss functions.
+- **Tests** — 12 FFT tests, 6 GPU mel spectrogram tests.
+
 ## 0.19.0 — KV-Cached Whisper Decoding (2026-03-26)
 
 ### Added
