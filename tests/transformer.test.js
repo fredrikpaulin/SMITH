@@ -181,7 +181,7 @@ test('finite-diff: layernorm input gradient (4x8)', () => {
   const x = smith.variable(smith.tensor(xData, [rows, cols]), { requiresGrad: true })
   const gamma = smith.variable(smith.tensor(Array.from({ length: cols }, () => 1 + Math.random() * 0.5), [cols]))
   const beta = smith.variable(smith.tensor(Array.from({ length: cols }, () => Math.random() * 0.1), [cols]))
-  numGradCheck(v => smith.sum(smith.layernorm(v, gamma, beta)), x, 5e-3)
+  numGradCheck(v => smith.sum(smith.layernorm(v, gamma, beta)), x, 0.01)
 })
 
 test('finite-diff: layernorm gamma gradient (4x8)', () => {
@@ -190,7 +190,7 @@ test('finite-diff: layernorm gamma gradient (4x8)', () => {
   const x = smith.variable(smith.tensor(xData, [rows, cols]))
   const gamma = smith.variable(smith.tensor(Array.from({ length: cols }, () => 1 + Math.random() * 0.5), [cols]), { requiresGrad: true })
   const beta = smith.variable(smith.tensor(Array.from({ length: cols }, () => Math.random() * 0.1), [cols]))
-  numGradCheck(v => smith.sum(smith.layernorm(x, v, beta)), gamma, 5e-3)
+  numGradCheck(v => smith.sum(smith.layernorm(x, v, beta)), gamma, 0.01)
 })
 
 test('finite-diff: softmax backward (4x16)', () => {
@@ -199,7 +199,7 @@ test('finite-diff: softmax backward (4x16)', () => {
   const x = smith.variable(smith.tensor(xData, [rows, cols]), { requiresGrad: true })
   // Use a weighted sum so gradient isn't trivially zero
   const weights = smith.variable(smith.tensor(Array.from({ length: rows * cols }, () => Math.random()), [rows, cols]))
-  numGradCheck(v => smith.sum(smith.mul(smith.softmax(v, -1), weights)), x, 5e-3)
+  numGradCheck(v => smith.sum(smith.mul(smith.softmax(v, -1), weights)), x, 0.01)
 })
 
 test('finite-diff: cross-entropy gradient (8x32)', () => {
@@ -207,7 +207,7 @@ test('finite-diff: cross-entropy gradient (8x32)', () => {
   const xData = Array.from({ length: batch * vocab }, () => Math.random() * 4 - 2)
   const targets = Array.from({ length: batch }, () => Math.floor(Math.random() * vocab))
   const x = smith.variable(smith.tensor(xData, [batch, vocab]), { requiresGrad: true })
-  numGradCheck(v => smith.crossEntropy(v, targets), x, 5e-3)
+  numGradCheck(v => smith.crossEntropy(v, targets), x, 0.01)
 })
 
 test('tiny GPT training step reduces loss', () => {

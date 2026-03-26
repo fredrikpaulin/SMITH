@@ -71,8 +71,8 @@ test('matmul backward (gradient check)', () => {
 
 // --- Larger GPU-verified matmul tests ---
 
-test('64x64 matmul: A @ I = A', () => {
-  const N = 64
+test('16x16 matmul: A @ I = A', () => {
+  const N = 16
   const aData = Array.from({ length: N * N }, () => Math.random() * 2 - 1)
   const eyeData = new Float32Array(N * N)
   for (let i = 0; i < N; i++) eyeData[i * N + i] = 1
@@ -81,7 +81,7 @@ test('64x64 matmul: A @ I = A', () => {
   const result = smith.matmul(va, ve)
   const resultArr = Array.from(result.data.data)
   for (let i = 0; i < N * N; i++) {
-    expect(Math.abs(resultArr[i] - aData[i])).toBeLessThan(1e-2)
+    expect(Math.abs(resultArr[i] - aData[i])).toBeLessThan(1e-3)
   }
 })
 

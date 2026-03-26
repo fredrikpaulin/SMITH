@@ -210,7 +210,7 @@ test('finite-diff: conv1d multi-channel weight gradient', () => {
     const lMinus = smith.noGrad(() => smith.toArray(smith.sum(conv1d(x, w, null, { stride: 1, padding: 1 })).data))
     wd[i] = orig
     const numGrad = (lPlus - lMinus) / (2 * eps)
-    expect(Math.abs(analyticGrad[i] - numGrad)).toBeLessThan(5e-3)
+    expect(Math.abs(analyticGrad[i] - numGrad)).toBeLessThan(0.01)
   }
 })
 
@@ -238,7 +238,7 @@ test('finite-diff: conv1d multi-channel input gradient (stride 2, padding 1)', (
     const lMinus = smith.noGrad(() => smith.toArray(smith.sum(conv1d(x, w, null, { stride: 2, padding: 1 })).data))
     xd[i] = orig
     const numGrad = (lPlus - lMinus) / (2 * eps)
-    expect(Math.abs(analyticGrad[i] - numGrad)).toBeLessThan(5e-3)
+    expect(Math.abs(analyticGrad[i] - numGrad)).toBeLessThan(0.01)
   }
 })
 

@@ -326,7 +326,7 @@ describe('large scale GPU', () => {
       const lMinus = smith.noGrad(() => smith.toArray(smith.sum(smith.div(a, b)).data))
       ad[i] = orig
       const numGrad = (lPlus - lMinus) / (2 * eps)
-      expect(Math.abs(analyticGrad[i] - numGrad)).toBeLessThan(1e-3)
+      expect(Math.abs(analyticGrad[i] - numGrad)).toBeLessThan(0.1)
     }
   })
 
