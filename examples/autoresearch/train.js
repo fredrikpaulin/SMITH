@@ -63,7 +63,7 @@ const SCALAR_LR = 0.5
 const WEIGHT_DECAY = 0.2
 const ADAM_BETAS = [0.8, 0.95]
 const WARMUP_RATIO = 0.0
-const WARMDOWN_RATIO = 0.5
+const WARMDOWN_RATIO = 0.0
 
 // --- Data ---
 
