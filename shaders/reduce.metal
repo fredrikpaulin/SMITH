@@ -11,16 +11,22 @@ using namespace metal;
 // Output buffer should have (num_threadgroups) elements.
 // For large inputs, run a second pass to reduce the partial sums.
 
+// Max threads per threadgroup on Apple Silicon — used for static shared memory sizing
+constant uint MAX_GROUP_SIZE = 1024;
+
 kernel void reduce_sum(
     device const float* input   [[buffer(0)]],
     device float* output         [[buffer(1)]],
     constant uint& size          [[buffer(2)]],
-    threadgroup float* shared    [[threadgroup(0)]],
     uint tid                     [[thread_position_in_grid]],
     uint lid                     [[thread_index_in_threadgroup]],
     uint group_id                [[threadgroup_position_in_grid]],
     uint group_size              [[threads_per_threadgroup]])
 {
+    // Static threadgroup memory (dynamic [[threadgroup(0)]] requires
+    // setThreadgroupMemoryLength which the native bridge doesn't call)
+    threadgroup float shared[MAX_GROUP_SIZE];
+
     // Each thread loads one element (or 0 if out of bounds)
     float val = tid < size ? input[tid] : 0.0f;
     shared[lid] = val;
@@ -43,12 +49,13 @@ kernel void reduce_max(
     device const float* input   [[buffer(0)]],
     device float* output         [[buffer(1)]],
     constant uint& size          [[buffer(2)]],
-    threadgroup float* shared    [[threadgroup(0)]],
     uint tid                     [[thread_position_in_grid]],
     uint lid                     [[thread_index_in_threadgroup]],
     uint group_id                [[threadgroup_position_in_grid]],
     uint group_size              [[threads_per_threadgroup]])
 {
+    threadgroup float shared[MAX_GROUP_SIZE];
+
     float val = tid < size ? input[tid] : -INFINITY;
     shared[lid] = val;
     threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -125,9 +132,10 @@ kernel void reduce_max_axis(
 
 kernel void reduce_sum_f16(
     device const half* input [[buffer(0)]], device half* output [[buffer(1)]], constant uint& size [[buffer(2)]],
-    threadgroup float* shared [[threadgroup(0)]], uint tid [[thread_position_in_grid]], uint lid [[thread_index_in_threadgroup]],
+    uint tid [[thread_position_in_grid]], uint lid [[thread_index_in_threadgroup]],
     uint group_id [[threadgroup_position_in_grid]], uint group_size [[threads_per_threadgroup]])
 {
+    threadgroup float shared[MAX_GROUP_SIZE];
     shared[lid] = tid < size ? float(input[tid]) : 0.0f;
     threadgroup_barrier(mem_flags::mem_threadgroup);
     for (uint stride = group_size / 2; stride > 0; stride >>= 1) { if (lid < stride) shared[lid] += shared[lid + stride]; threadgroup_barrier(mem_flags::mem_threadgroup); }
@@ -136,9 +144,10 @@ kernel void reduce_sum_f16(
 
 kernel void reduce_max_f16(
     device const half* input [[buffer(0)]], device half* output [[buffer(1)]], constant uint& size [[buffer(2)]],
-    threadgroup float* shared [[threadgroup(0)]], uint tid [[thread_position_in_grid]], uint lid [[thread_index_in_threadgroup]],
+    uint tid [[thread_position_in_grid]], uint lid [[thread_index_in_threadgroup]],
     uint group_id [[threadgroup_position_in_grid]], uint group_size [[threads_per_threadgroup]])
 {
+    threadgroup float shared[MAX_GROUP_SIZE];
     shared[lid] = tid < size ? float(input[tid]) : -INFINITY;
     threadgroup_barrier(mem_flags::mem_threadgroup);
     for (uint stride = group_size / 2; stride > 0; stride >>= 1) { if (lid < stride) shared[lid] = max(shared[lid], shared[lid + stride]); threadgroup_barrier(mem_flags::mem_threadgroup); }

@@ -74,6 +74,10 @@ void smith_set_bytes(SmithEncoder* enc, const void* data, uint32_t length, uint3
 // Set the active compute pipeline.
 void smith_set_pipeline(SmithEncoder* enc, void* pipeline);
 
+// Set threadgroup memory size at the given index.
+// Required for kernels using [[threadgroup(n)]] dynamic shared memory.
+void smith_set_threadgroup_memory(SmithEncoder* enc, uint64_t length, uint32_t index);
+
 // Dispatch with explicit grid and threadgroup dimensions.
 void smith_dispatch(SmithEncoder* enc,
                     uint64_t grid_x, uint64_t grid_y, uint64_t grid_z,

@@ -32,6 +32,7 @@ const { symbols: lib } = dlopen(LIB_PATH, {
   smith_begin:                      { returns: FFIType.ptr, args: [FFIType.ptr] },
   smith_set_buffer:                 { returns: FFIType.void, args: [FFIType.ptr, FFIType.ptr, FFIType.u32] },
   smith_set_bytes:                  { returns: FFIType.void, args: [FFIType.ptr, FFIType.ptr, FFIType.u32, FFIType.u32] },
+  smith_set_threadgroup_memory:     { returns: FFIType.void, args: [FFIType.ptr, FFIType.u64, FFIType.u32] },
   smith_set_pipeline:               { returns: FFIType.void, args: [FFIType.ptr, FFIType.ptr] },
   smith_dispatch:                   { returns: FFIType.void, args: [FFIType.ptr, FFIType.u64, FFIType.u64, FFIType.u64, FFIType.u64, FFIType.u64, FFIType.u64] },
   smith_end_sync:                   { returns: FFIType.void, args: [FFIType.ptr] },
@@ -136,6 +137,10 @@ function setBytes(enc, data, length, index) {
   lib.smith_set_bytes(enc, data, length, index)
 }
 
+function setThreadgroupMemory(enc, length, index) {
+  lib.smith_set_threadgroup_memory(enc, length, index)
+}
+
 function setPipeline(enc, pipelinePtr) {
   lib.smith_set_pipeline(enc, pipelinePtr)
 }
@@ -221,6 +226,7 @@ export {
   begin,
   setBuffer,
   setBytes,
+  setThreadgroupMemory,
   setPipeline,
   dispatch,
   endSync,

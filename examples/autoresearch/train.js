@@ -167,7 +167,6 @@ while (true) {
     }
   }
 
-  // Optimizer step
   smith.muonAdamWStep(optimizer)
   smith.zeroGrad(params)
 

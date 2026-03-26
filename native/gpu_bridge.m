@@ -178,6 +178,10 @@ void smith_set_pipeline(SmithEncoder* enc, void* pipeline) {
   [enc->encoder setComputePipelineState:pso];
 }
 
+void smith_set_threadgroup_memory(SmithEncoder* enc, uint64_t length, uint32_t index) {
+  [enc->encoder setThreadgroupMemoryLength:length atIndex:index];
+}
+
 void smith_dispatch(SmithEncoder* enc,
                     uint64_t grid_x, uint64_t grid_y, uint64_t grid_z,
                     uint64_t group_x, uint64_t group_y, uint64_t group_z) {

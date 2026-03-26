@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.29.1 — Tiled Matmul Threadgroup Memory Fix (2026-03-26)
+
+### Fixed
+
+- **Tiled GEMM kernels produced all-zero output** — `matmul_f32` and `matmul_f16` in `shaders/matmul.metal` declared dynamic threadgroup memory via `[[threadgroup(0)]]`, but the native bridge never called `setThreadgroupMemoryLength:atIndex:` to allocate it. With zero bytes of threadgroup memory, shared tile loads read back zeros, making the entire tiled accumulation produce zero. Replaced with static `threadgroup float As[TILE_M * TILE_K]` / `Bs[TILE_K * TILE_N]` arrays that Metal allocates automatically.
+- **Same bug in `reduce_sum`, `reduce_max`, `reduce_sum_f16`, `reduce_max_f16`** — all used `[[threadgroup(0)]]` for their parallel reduction shared memory. Replaced with static `threadgroup float shared[1024]`.
+- Training loss was stuck at ln(vocabSize) = 8.3178 because every matmul with all dimensions ≥ 64 (the `TILE_THRESHOLD`) produced zeros — both forward (all-zero logits → uniform softmax) and backward (all-zero gradients → no learning).
+
+### Added
+
+- **`smith_set_threadgroup_memory`** in native bridge (`gpu_bridge.m/.h`) and FFI binding (`device.js`) — for future kernels that need dynamic threadgroup memory allocation.
+
 ## 0.29.0 — Autoresearch Example (2026-03-26)
 
 ### Added

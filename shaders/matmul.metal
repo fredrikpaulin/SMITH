@@ -33,15 +33,14 @@ kernel void matmul_f32(
     device const float* B       [[buffer(1)]],
     device float* C              [[buffer(2)]],
     constant MatmulParams& p     [[buffer(3)]],
-    threadgroup float* shared    [[threadgroup(0)]],
     uint2 group_id               [[threadgroup_position_in_grid]],
     uint tid_in_group            [[thread_index_in_threadgroup]])
 {
-    // Threadgroup-local shared memory layout:
-    // [0 .. TILE_M*TILE_K) = tile of A
-    // [TILE_M*TILE_K .. TILE_M*TILE_K + TILE_K*TILE_N) = tile of B
-    threadgroup float* As = shared;
-    threadgroup float* Bs = shared + TILE_M * TILE_K;
+    // Static threadgroup memory — allocated automatically by Metal.
+    // (Using [[threadgroup(0)]] requires setThreadgroupMemoryLength which
+    // the native bridge doesn't call, so we use static arrays instead.)
+    threadgroup float As[TILE_M * TILE_K];
+    threadgroup float Bs[TILE_K * TILE_N];
 
     uint M = p.M, N = p.N, K = p.K;
 
@@ -175,12 +174,11 @@ kernel void matmul_f16(
     device const half* B        [[buffer(1)]],
     device half* C              [[buffer(2)]],
     constant MatmulParams& p    [[buffer(3)]],
-    threadgroup float* shared   [[threadgroup(0)]],
     uint2 group_id              [[threadgroup_position_in_grid]],
     uint tid_in_group           [[thread_index_in_threadgroup]])
 {
-    threadgroup float* As = shared;
-    threadgroup float* Bs = shared + TILE_M * TILE_K;
+    threadgroup float As[TILE_M * TILE_K];
+    threadgroup float Bs[TILE_K * TILE_N];
 
     uint M = p.M, N = p.N, K = p.K;
     uint thread_row = (tid_in_group / (TILE_N / THREAD_N)) * THREAD_M;
