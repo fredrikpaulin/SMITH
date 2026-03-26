@@ -173,7 +173,7 @@ function printExperiment(exp, previousBest) {
     const bpb = exp.metrics.val_bpb.toFixed(4)
     const statusIcon = exp.status === 'keep' ? `${c.green}✓ KEEP` : `${c.red}✗ DISCARD`
     const delta = exp.improvement
-      ? ` (${delta > 0 ? '-' : '+'}${Math.abs(exp.improvement).toFixed(4)})`
+      ? ` (${exp.improvement > 0 ? '-' : '+'}${Math.abs(exp.improvement).toFixed(4)})`
       : ''
 
     console.log(`  ${statusIcon}${c.reset}  val_bpb: ${c.bold}${bpb}${c.reset}${c.dim}${delta}${c.reset}`)

@@ -232,6 +232,8 @@ function createMuonAdamW(groups) {
 }
 
 function muonAdamWStep(opt) {
+  // Increment AdamW step counter once per optimizer step, not per group
+  opt._adamwStep++
   for (const group of opt.groups) {
     if (group.kind === 'adamw') {
       stepAdamW(opt, group)
@@ -245,7 +247,6 @@ function muonAdamWStep(opt) {
 
 function stepAdamW(opt, group) {
   const { lr = 1e-3, betas = [0.9, 0.999], eps = 1e-8, weightDecay = 0.01 } = group
-  opt._adamwStep++
   const step = opt._adamwStep
   const bc1 = 1 - Math.pow(betas[0], step)
   const bc2 = 1 - Math.pow(betas[1], step)

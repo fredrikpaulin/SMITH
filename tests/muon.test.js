@@ -356,6 +356,42 @@ test('MuonAdamW: skips params without grad', () => {
   }
 })
 
+// --- AdamW step counter consistency ---
+
+test('MuonAdamW: adamw step counter increments once per optimizer step, not per group', () => {
+  // Two AdamW groups — the step counter should be the same for both
+  const w1 = variable(tensor([1, 2, 3], [3]), { requiresGrad: true })
+  const w2 = variable(tensor([4, 5, 6], [3]), { requiresGrad: true })
+
+  const opt = smith.createMuonAdamW([
+    { kind: 'adamw', params: [w1], lr: 0.1, betas: [0.9, 0.999], eps: 1e-8, weightDecay: 0.0 },
+    { kind: 'adamw', params: [w2], lr: 0.1, betas: [0.9, 0.999], eps: 1e-8, weightDecay: 0.0 },
+  ])
+
+  // Both have identical init values and identical grads — they should get identical updates
+  w1.grad = tensor([1, 1, 1], [3])
+  w2.grad = tensor([1, 1, 1], [3])
+  smith.muonAdamWStep(opt)
+
+  // After 1 step, _adamwStep should be 1 (not 2)
+  expect(opt._adamwStep).toBe(1)
+
+  // Both groups used the same step value, so bias correction was identical.
+  // With same init and same grad, the updates should match exactly.
+  const r1 = flat(w1.data)
+  const r2 = flat(w2.data)
+  for (let i = 0; i < 3; i++) {
+    // w1 started at [1,2,3], w2 at [4,5,6], offsets differ but delta should be identical
+    expectClose(r1[i] - [1, 2, 3][i], r2[i] - [4, 5, 6][i], 1e-6)
+  }
+
+  // Second step
+  w1.grad = tensor([1, 1, 1], [3])
+  w2.grad = tensor([1, 1, 1], [3])
+  smith.muonAdamWStep(opt)
+  expect(opt._adamwStep).toBe(2)
+})
+
 // --- Square matrix (exercises wide path per reference) ---
 
 test('MuonAdamW: square matrix uses wide NS path', () => {

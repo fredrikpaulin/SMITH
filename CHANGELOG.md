@@ -9,12 +9,24 @@
 - **`examples/autoresearch/prepare.js`** — Data preparation CLI. Downloads public domain texts from Project Gutenberg, trains BPE tokenizer, saves tokenized train/val splits.
 - **`examples/autoresearch/train.js`** — Training loop with LR warmup/warmdown schedule, Muon momentum ramp, time-budgeted training, gradient accumulation across sequences, and final BPB evaluation.
 - **`examples/autoresearch/research.js`** — Experiment runner for the autonomous research loop. Wraps training execution, parses output metrics, logs results to both `experiments.json` and `research_log.md`. Commands: `run`, `last`, `status`, `best`. Colorized TUI output with experiment timeline, improvement tracking, and hit rate statistics.
-- **`examples/autoresearch/CLAUDE.md`** — Agent prompt for Claude Code. Describes the setup procedure, experiment loop, rules (what's modifiable vs read-only), and research runner commands. Follows the Karpathy autoresearch pattern: one machine, one file, one metric, never stop.
-- **Tests** — Model tests (creation, init, forward shape, loss, backward gradients, optimizer step, loss reduction, VE placement, soft-capping bounds, window pattern, GQA forward/backward, T=1 single token, T=seqLen full length, full gradient flow after one optimizer step). Data tests (loader shapes, advancement, wraparound, reset, BPB computation, special token handling). Research runner tests (metric parsing, JSON roundtrip, best selection, status computation, markdown format, CLI args).
+- **`examples/autoresearch/CLAUDE.md`** — Agent prompt for Claude Code. Describes the setup procedure, experiment loop, rules (what's modifiable vs read-only), and research runner commands. Follows the Karpathy autoresearch pattern: one machine, one file, one metric, never stop. Includes bug detection heuristics (stuck loss, zero gradients, unchanged weights) that instruct the agent to stop and report framework issues instead of blindly iterating. Agent log at `results/agent_log.md` for cross-session observations.
+- **`examples/autoresearch/reset.sh`** — Resets autoresearch to clean state: restores train.js/model.js from git, clears results and Claude Code session, optionally deletes experiment branch.
+- **Smith API skill** symlinked into autoresearch `.claude/skills/` so the agent has the full API reference without reading source code.
+- **Training telemetry** in `train.js` — captures gradient norms and weight norms at diagnostic steps (0, 1, 2, then every 10% of training). Prints `=== TELEMETRY ===` block after the summary with loss trajectory, per-param grad/weight snapshots, weight delta from init, and a WARNING if loss is stuck at ln(vocabSize).
+- **Tests** — Model tests (creation, init, forward shape, loss, backward gradients, optimizer step, loss reduction, VE placement, soft-capping bounds, window pattern, GQA forward/backward, T=1 single token, T=seqLen full length, full gradient flow after one optimizer step, training loop with gradient accumulation, all param groups get updates). Data tests (loader shapes, advancement, wraparound, reset, BPB computation, special token handling). Research runner tests (metric parsing, JSON roundtrip, best selection, status computation, markdown format, CLI args).
 
 ### Changed
 
 - **Strengthened test suite with finite-difference gradient checks.** Added `numGradCheck` helpers to `autograd.test.js` and `transformer.test.js` that perturb each element ±ε and compare `(L+ - L-) / 2ε` against the analytical GPU backward pass. New tests: relu(64), gelu(64), mul chain(32), matmul(16×16), scale+add chain(64), layernorm input/gamma(4×8), softmax(4×16), cross-entropy(8×32). Also added larger-scale GPU-verified tests to `matmul.test.js` (16×16 identity, non-square [32×64]@[64×16], associativity), `conv1d.test.js` (multi-channel weight/input grad finite-diff with stride 2), and `div_gather.test.js` (256-element round trip, 2D 64×8 round trip, div finite-diff(64), gather backward(128, 32 indices)). Tolerances tuned for f32 GPU accumulation (0.01–0.1 depending on op).
+
+### Fixed
+
+- **AdamW step counter in MuonAdamW** — `_adamwStep` was incrementing once per AdamW group per optimizer step instead of once per step. With 5 AdamW groups, bias correction used step=1→5 on step 1, step=6→10 on step 2, etc. All groups now share the correct step counter, producing consistent bias correction across groups.
+- **`research.js` delta variable self-reference** — `printExperiment` referenced `delta` during its own initialization in the template literal. Changed `delta > 0` to `exp.improvement > 0`.
+
+### Known Issues
+
+- **`sliceScalar` in autoresearch model breaks gradient flow** — `residLambdas` and `x0Lambdas` are read as plain JS numbers via `sliceScalar()`, bypassing autograd. The optimizer's AdamW step skips them (`if (!p.grad) continue`), so they remain at their init values (1.0 and 0.1). Fixing requires a differentiable scalar index op or switching from `scale(x, number)` to `mul(x, variable)` with broadcast support.
 
 ## 0.28.0 — MuonAdamW Optimizer (2026-03-26)
 

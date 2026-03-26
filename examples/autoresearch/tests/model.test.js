@@ -296,6 +296,122 @@ test('GQA forward and backward (nKVHead < nHead)', () => {
   expect(model.blocks[0].cQ.data.shape).toEqual([64, 64])  // [nEmbd, nHead*headDim]
 })
 
+// --- Integration: training loop with gradient accumulation ---
+
+test('training loop with gradient accumulation reduces loss', () => {
+  const model = createModel(smallConfig)
+  initWeights(model)
+  const opt = setupOptimizer(model, {
+    matrixLr: 0.02,
+    embeddingLr: 0.6,
+    unembeddingLr: 0.004,
+    scalarLr: 0.5,
+    weightDecay: 0.0,
+  })
+  const params = allParams(model)
+
+  // Fixed repeating pattern — model should memorize this
+  const seqLen = 16
+  const seqsPerStep = 2
+  const sequences = []
+  for (let s = 0; s < seqsPerStep; s++) {
+    const input = Array.from({ length: seqLen }, (_, i) => (i + s * 3) % 64)
+    const target = Array.from({ length: seqLen }, (_, i) => (i + 1 + s * 3) % 64)
+    sequences.push({ input, target })
+  }
+
+  let firstLoss = null
+  let lastLoss = null
+  const steps = 20
+
+  for (let step = 0; step < steps; step++) {
+    let stepLoss = 0
+
+    // Gradient accumulation over multiple sequences (mirrors train.js)
+    for (let seq = 0; seq < seqsPerStep; seq++) {
+      const { input, target } = sequences[seq]
+      const { loss } = forward(model, input, target)
+      stepLoss += loss.data.data[0]
+
+      const scaledLoss = smith.scale(loss, 1.0 / seqsPerStep)
+      smith.backward(scaledLoss)
+    }
+    stepLoss /= seqsPerStep
+
+    // Optimizer step
+    smith.muonAdamWStep(opt)
+    smith.zeroGrad(params)
+
+    if (step === 0) firstLoss = stepLoss
+    lastLoss = stepLoss
+
+    // Sanity: loss should never be NaN
+    expect(isFinite(stepLoss)).toBe(true)
+  }
+
+  // Loss must decrease significantly over 20 steps
+  expect(lastLoss).toBeLessThan(firstLoss * 0.95)
+
+  // AdamW step counter should match number of steps taken
+  expect(opt._adamwStep).toBe(steps)
+})
+
+test('training with gradient accumulation: all param groups get updates', () => {
+  const model = createModel(smallConfig)
+  initWeights(model)
+  const opt = setupOptimizer(model, {
+    matrixLr: 0.02,
+    embeddingLr: 0.6,
+    unembeddingLr: 0.004,
+    weightDecay: 0.0,
+  })
+  const params = allParams(model)
+
+  // Snapshot initial weights
+  const initWeightSnap = new Map()
+  for (const p of params) {
+    initWeightSnap.set(p, Array.from(p.data.data))
+  }
+
+  const seqLen = 16
+  const seqsPerStep = 2
+  const sequences = []
+  for (let s = 0; s < seqsPerStep; s++) {
+    sequences.push({
+      input: Array.from({ length: seqLen }, (_, i) => (i + s * 7) % 64),
+      target: Array.from({ length: seqLen }, (_, i) => (i + 1 + s * 7) % 64),
+    })
+  }
+
+  // Run 3 steps so projections (init'd to zero) become non-zero
+  // and all params can receive gradients
+  for (let step = 0; step < 3; step++) {
+    for (let seq = 0; seq < seqsPerStep; seq++) {
+      const { loss } = forward(model, sequences[seq].input, sequences[seq].target)
+      smith.backward(smith.scale(loss, 1.0 / seqsPerStep))
+    }
+    smith.muonAdamWStep(opt)
+    smith.zeroGrad(params)
+  }
+
+  // After 3 steps, check which params have changed
+  let changedCount = 0
+  for (const p of params) {
+    const init = initWeightSnap.get(p)
+    const curr = Array.from(p.data.data)
+    let changed = false
+    for (let i = 0; i < curr.length; i++) {
+      if (Math.abs(curr[i] - init[i]) > 1e-8) { changed = true; break }
+    }
+    if (changed) changedCount++
+  }
+
+  // Most params should have changed (exception: residLambdas/x0Lambdas
+  // which don't get gradients due to sliceScalar returning plain numbers)
+  const totalParams = params.length
+  expect(changedCount).toBeGreaterThan(totalParams * 0.8)
+})
+
 // --- Edge case: T=1 (single token) ---
 
 test('forward with single token (T=1)', () => {
