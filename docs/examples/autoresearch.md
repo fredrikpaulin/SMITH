@@ -129,5 +129,5 @@ This example exercises the following Smith autograd operations:
 bun test examples/autoresearch/tests/
 ```
 
-- **model.test.js** — Model creation, weight init, forward logit shape, loss, backward gradients, optimizer step finiteness, loss reduction over 10 steps, VE layer placement, soft-capping bounds, window pattern.
+- **model.test.js** — Model creation, weight init, forward logit shape, loss, backward gradients (tests cProj/cMlpProj/lmHead since zero-init projections block upstream gradients on first step), optimizer step finiteness, loss reduction over 10 steps, VE layer placement, soft-capping bounds, window pattern, GQA forward/backward (nKVHead < nHead), T=1 single token edge case, T=seqLen full length, full gradient flow after one optimizer step (verifies cQ/cFc get gradients once projections are non-zero).
 - **data.test.js** — Loader shapes, position advancement, wraparound, reset, BPB computation, special token handling, totalTokens property.
