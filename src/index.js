@@ -17,6 +17,7 @@ import { parseGGUF, listTensors as listGGUFTensors, extractConfig as extractGGUF
 import { poolStats, poolDrain } from './pool.js'
 import { gpuFFT, gpuIFFT, gpuBatchFFT } from './ops/fft.js'
 import { gpuArgmax, gpuSample } from './ops/sampling.js'
+import { gather as gpuGatherOp, scatterAdd as gpuScatterAdd, scatter as gpuScatterOp } from './ops/gather.js'
 import { gpuMelSpectrogram } from './ops/mel.js'
 import { dtypeBytes, toFloat16, fromFloat16, float32ToFloat16, float16ToFloat32 } from './dtype.js'
 import { f16Mode, defaultDtype, createLossScaler } from './f16mode.js'
@@ -68,11 +69,12 @@ const { tensor, zeros, ones, full, rand, randn, scalar, toArray, toString: tenso
 // Re-export autograd
 const {
   variable, param, backward, zeroGrad, noGrad,
-  add, sub, mul, matmul, scale, neg,
+  add, sub, mul, div, matmul, scale, neg,
   relu, gelu, softmax, layernorm, crossEntropy,
   flashAttention,
   sum, reshape, transpose,
   embedding, addGrad,
+  gather, scatter,
   fft,
   conv1d, conv1dOutputSize,
   conv2d, maxPool2d, avgPool2d, batchnorm,
@@ -125,11 +127,15 @@ const smith = {
   variable, param, backward, zeroGrad, noGrad,
 
   // Ops (on variables)
-  add, sub, mul, matmul, scale, neg,
+  add, sub, mul, div, matmul, scale, neg,
   relu, gelu, softmax, layernorm, crossEntropy,
   flashAttention,
   sum, reshape, transpose,
   embedding, addGrad,
+  gather, scatter,
+
+  // Gather/Scatter (raw GPU ops)
+  gpuGatherOp, gpuScatterAdd, gpuScatterOp,
 
   // Neural network
   createLinear, linear, linearParams,
@@ -226,11 +232,13 @@ export default smith
 export {
   tensor, zeros, ones, full, rand, randn, scalar, toArray,
   variable, param, backward, zeroGrad, noGrad,
-  add, sub, mul, matmul, scale, neg,
+  add, sub, mul, div, matmul, scale, neg,
   relu, gelu, softmax, layernorm, crossEntropy,
   flashAttention,
   sum, reshape, transpose,
   embedding, addGrad,
+  gather, scatter,
+  gpuGatherOp, gpuScatterAdd, gpuScatterOp,
   createLinear, linear, linearParams,
   createCausalMask,
   createMultiHeadAttention, multiHeadAttention, multiHeadAttentionFlash, multiHeadAttentionCached,

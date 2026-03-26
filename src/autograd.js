@@ -25,6 +25,7 @@ import { batchnormForward as gpuBnFwd, batchnormInference as gpuBnInfer, batchno
 import { ropeForward as gpuRopeFwd, ropeBackward as gpuRopeBwd, precomputeRoPE } from './ops/rope.js'
 import { rmsnormForward as gpuRmsnormFwd, rmsnormBackward as gpuRmsnormBwd } from './ops/rmsnorm.js'
 import { swigluForward as gpuSwigluFwd, swigluBackward as gpuSwigluBwd } from './ops/swiglu.js'
+import { gather as gpuGather, scatterAdd as gpuScatterAdd, scatter as gpuScatter } from './ops/gather.js'
 import * as conv1dGpu from './ops/conv1d.js'
 import { gpuFFT as gpuFFTOp, gpuIFFT as gpuIFFTOp, gpuBatchFFT as gpuBatchFFTOp } from './ops/fft.js'
 
@@ -134,6 +135,21 @@ function mul(a, b) {
     _backward: _noGrad ? null : (grad) => {
       addGrad(a, gpuMul(grad, b.data))
       addGrad(b, gpuMul(grad, a.data))
+    },
+  })
+}
+
+// div: dA = dOut / b, dB = -dOut * a / b²
+function div(a, b) {
+  return variable(gpuDiv(a.data, b.data), {
+    _deps: [a, b],
+    _backward: _noGrad ? null : (grad) => {
+      addGrad(a, gpuDiv(grad, b.data))
+      // dB = -grad * a / b² = -grad * (a/b) / b
+      const negGrad = gpuNeg(grad)
+      const negGradTimesA = gpuMul(negGrad, a.data)
+      const bSquared = gpuMul(b.data, b.data)
+      addGrad(b, gpuDiv(negGradTimesA, bSquared))
     },
   })
 }
@@ -266,6 +282,40 @@ function embedding(indices, weight) {
         }
       }
       weight.grad = wGrad
+    },
+  })
+}
+
+// --- Gather / Scatter (GPU-backed) ---
+
+// gather: output[...][indices[i]][...] = input[...][dim_i][...]
+// backward: scatter-add grad into input-shaped zero tensor
+function gatherOp(a, axis, indices) {
+  const outData = gpuGather(a.data, axis, indices)
+  return variable(outData, {
+    _deps: [a],
+    _backward: _noGrad ? null : (grad) => {
+      const aGrad = T.zeros(a.data.shape, a.data.dtype)
+      gpuScatterAdd(aGrad, axis, indices, grad)
+      addGrad(a, aGrad)
+    },
+  })
+}
+
+// scatter: output = input with src values written at indices along axis
+// backward for input: gather the grad at non-scattered positions (identity minus scattered)
+// backward for src: gather grad at the scattered positions
+function scatterOp(a, axis, indices, src) {
+  const outData = gpuScatter(a.data, axis, indices, src.data)
+  return variable(outData, {
+    _deps: [a, src],
+    _backward: _noGrad ? null : (grad) => {
+      // dSrc = gather(grad, axis, indices) — grad at scattered positions flows to src
+      const srcGrad = gpuGather(grad, axis, indices)
+      addGrad(src, srcGrad)
+      // dInput = grad with scattered positions zeroed (those values came from src, not input)
+      const zeroSrc = T.zeros(srcGrad.shape, grad.dtype)
+      addGrad(a, gpuScatter(grad, axis, indices, zeroSrc))
     },
   })
 }
@@ -589,7 +639,7 @@ function fft(input) {
 export {
   variable, param,
   backward, zeroGrad, noGrad,
-  add, sub, mul, matmul, scale, neg,
+  add, sub, mul, div, matmul, scale, neg,
   relu, gelu,
   softmax, layernorm, crossEntropy,
   flashAttention,
@@ -602,4 +652,5 @@ export {
   conv2d, maxPool2d, avgPool2d, batchnorm,
   createBatchNorm, convOutputSize,
   rope, rmsNorm, swiglu, precomputeRoPE,
+  gatherOp as gather, scatterOp as scatter,
 }

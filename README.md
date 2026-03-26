@@ -18,6 +18,7 @@ Smith gives JavaScript direct access to Metal compute shaders through a thin C b
 - **Mixed precision** — f16 mode with loss scaling
 - **Tensor lifecycle** — `dispose()`, `retain()`, scoped cleanup via `using()`, allocation guards
 - **GPU sampling** — argmax, top-K, temperature, repetition penalty, and multinomial sampling on GPU. Only 4 bytes per token cross the GPU→CPU boundary.
+- **Gather/scatter** — GPU-backed indexed read/write along any axis with autograd. Atomic scatter-add for duplicate indices.
 - **Profiling** — per-kernel GPU timing, memory tracking, benchmarking
 - **BPE tokenizer**, checkpoint save/load, text generation with temperature/top-k/top-p/repetition penalty
 

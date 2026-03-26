@@ -57,6 +57,14 @@ All ops return new Variables with backward functions.
 
 **Embedding:** `embedding(indices, weight)` — CPU gather, GPU scatter-add backward
 
+**Div:** `div(a, b)` — Element-wise division with backward: `dA = dOut / b`, `dB = -dOut * a / b²`
+
+**Gather:** `gather(input, axis, indices)` — Indexed read along any axis. Backward: scatter-add gradient. GPU-backed via `[outer, dimSize, inner]` decomposition.
+
+**Scatter:** `scatter(input, axis, indices, src)` — Write `src` values at `indices` along axis (last-write-wins). Backward: `dSrc = gather(grad)`, `dInput = grad` with scattered positions zeroed.
+
+**Raw gather/scatter:** `gpuGatherOp(tensor, axis, indices)`, `gpuScatterAdd(dst, axis, indices, src)`, `gpuScatterOp(input, axis, indices, src)` — Direct GPU dispatch without autograd.
+
 ## FFT and Mel Spectrogram
 
 Low-level GPU FFT and mel spectrogram extraction. Useful for audio processing pipelines.

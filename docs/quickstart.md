@@ -165,6 +165,25 @@ const ids = generateGGUF(model, promptIds, {
 })
 ```
 
+## Gather and Scatter
+
+Indexed read and write along any tensor axis, with full autograd support.
+
+```js
+import smith from './src/index.js'
+
+// Gather: pick rows from a weight matrix
+const W = smith.variable(smith.tensor([1,2,3,4,5,6], [3,2]), { requiresGrad: true })
+const selected = smith.gather(W, 0, [0, 2])  // shape [2,2], picks rows 0 and 2
+const loss = smith.sum(selected)
+smith.backward(loss) // gradients scatter-add back to W
+
+// Scatter: write values at specific indices
+const base = smith.variable(smith.tensor([0,0,0,0,0], [5]), { requiresGrad: true })
+const src = smith.variable(smith.tensor([99, 88], [2]), { requiresGrad: true })
+const out = smith.scatter(base, 0, [1, 3], src)  // [0, 99, 0, 88, 0]
+```
+
 ## Benchmarks
 
 ```sh

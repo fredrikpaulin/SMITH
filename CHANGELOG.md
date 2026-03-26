@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.25.0 — Autograd `div` and Gather/Scatter (2026-03-26)
+
+### Added
+
+- **`autograd.div(a, b)`** — Element-wise division with full backward support. Gradients: `dA = dOut / b`, `dB = -dOut * a / b²`. Chains through existing mul/neg/div GPU ops (no fused kernel needed).
+- **`shaders/gather_scatter.metal`** — Three Metal kernels: `gather_forward` (indexed read along any axis), `scatter_add` (atomic accumulation for duplicate indices), `scatter_forward` (non-atomic write, last-write-wins).
+- **`src/ops/gather.js`** — GPU dispatch layer for gather and scatter operations. Input treated as `[outer, dimSize, inner]` layout for arbitrary-axis indexing.
+- **`autograd.gather(input, axis, indices)`** — Differentiable gather. Backward: scatter-add gradient into input-shaped zero tensor.
+- **`autograd.scatter(input, axis, indices, src)`** — Differentiable scatter. Backward: `dSrc = gather(grad, indices)`, `dInput = grad` with scattered positions zeroed.
+- **`gpuGatherOp`, `gpuScatterAdd`, `gpuScatterOp`** — Raw GPU ops exported for direct use outside autograd.
+- **Tests** — 25+ tests covering div forward/backward/chaining, gather 1D/2D/duplicate indices, scatter-add with accumulation, scatter overwrite, autograd backward for both ops, round-trip correctness, and combined div+gather pipeline.
+
 ## 0.24.0 — GPU-Side Sampling (2026-03-26)
 
 ### Added
