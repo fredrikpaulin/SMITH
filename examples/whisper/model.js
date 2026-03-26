@@ -12,7 +12,8 @@ const { variable, tensor, zeros, ones, conv1d, sinusoidalPE,
   matmul, add, gelu, layernorm, softmax, reshape, transpose, scale,
   noGrad, embedding,
   createLinear, linear, linearParams,
-  createMultiHeadAttention, multiHeadAttention, multiHeadCrossAttention, mhaParams,
+  createMultiHeadAttention, multiHeadAttention, multiHeadAttentionCached,
+  multiHeadCrossAttention, multiHeadCrossAttentionCached, mhaParams,
   createCausalMask,
 } = smith
 
@@ -207,34 +208,7 @@ function whisperTranscribe(model, melInput, opts = {}) {
         tokens.length * model.config.vocabSize
       )
 
-      let nextToken
-      if (temperature === 0) {
-        nextToken = 0
-        let maxVal = lastLogits[0]
-        for (let i = 1; i < lastLogits.length; i++) {
-          if (lastLogits[i] > maxVal) { maxVal = lastLogits[i]; nextToken = i }
-        }
-      } else {
-        const scaled = new Float32Array(lastLogits.length)
-        let maxVal = -Infinity
-        for (let i = 0; i < scaled.length; i++) {
-          scaled[i] = lastLogits[i] / temperature
-          if (scaled[i] > maxVal) maxVal = scaled[i]
-        }
-        let sum = 0
-        for (let i = 0; i < scaled.length; i++) {
-          scaled[i] = Math.exp(scaled[i] - maxVal)
-          sum += scaled[i]
-        }
-        for (let i = 0; i < scaled.length; i++) scaled[i] /= sum
-
-        let r = Math.random()
-        nextToken = scaled.length - 1
-        for (let i = 0; i < scaled.length; i++) {
-          r -= scaled[i]
-          if (r <= 0) { nextToken = i; break }
-        }
-      }
+      const nextToken = sampleToken(lastLogits, temperature)
 
       if (nextToken === eotToken) break
       result.push(nextToken)
@@ -248,6 +222,221 @@ function whisperTranscribe(model, melInput, opts = {}) {
 
     return result
   })
+}
+
+// --- KV-cached decoding (Phase 19) ---
+
+// Pre-compute encoder K/V projections for all decoder cross-attention layers.
+// Called once after encoding; the result is reused for every decode step.
+// Returns array of { k, v } per decoder block, where k/v are [numHeads, kvLen, headDim].
+function precomputeEncoderKV(model, encoderOut) {
+  const { config } = model
+  const kvLen = encoderOut.data.shape[0]
+  const { numHeads, headDim } = model.decoderBlocks[0].crossAttn
+
+  return model.decoderBlocks.map(block => {
+    const K = linear(encoderOut, block.crossAttn.kProj)
+    const V = linear(encoderOut, block.crossAttn.vProj)
+    const Kh = transpose(reshape(K, [kvLen, numHeads, headDim]), [1, 0, 2])
+    const Vh = transpose(reshape(V, [kvLen, numHeads, headDim]), [1, 0, 2])
+    return { k: Kh, v: Vh }
+  })
+}
+
+// Decoder block for prefill: runs full-sequence self-attention (with causal mask)
+// and full-sequence cross-attention, but also returns self-attention K/V cache.
+function decoderBlockPrefill(x, block, encoderOut, mask) {
+  const seqLen = x.data.shape[0]
+  const { numHeads, headDim, dim } = block.selfAttn
+
+  // Self-attention with causal mask — also extract K/V for cache
+  const norm1 = layernorm(x, block.selfAttnLnW, block.selfAttnLnB)
+  const { output: selfAttnOut } = multiHeadAttention(norm1, block.selfAttn, mask)
+
+  // Extract K/V from this self-attention for the cache
+  const K = linear(norm1, block.selfAttn.kProj)
+  const V = linear(norm1, block.selfAttn.vProj)
+  const Kh = transpose(reshape(K, [seqLen, numHeads, headDim]), [1, 0, 2])
+  const Vh = transpose(reshape(V, [seqLen, numHeads, headDim]), [1, 0, 2])
+
+  const x2 = add(x, selfAttnOut)
+
+  // Cross-attention to encoder output (full sequence)
+  const norm2 = layernorm(x2, block.crossAttnLnW, block.crossAttnLnB)
+  const { output: crossAttnOut } = multiHeadCrossAttention(norm2, encoderOut, block.crossAttn)
+  const x3 = add(x2, crossAttnOut)
+
+  // FFN
+  const norm3 = layernorm(x3, block.ffnLnW, block.ffnLnB)
+  const ffnOut = linear(gelu(linear(norm3, block.ffn1)), block.ffn2)
+  return { output: add(x3, ffnOut), selfCache: { k: Kh, v: Vh } }
+}
+
+// Decoder block for single-token step: uses cached self-attention and pre-computed encoder K/V.
+function decoderBlockStep(x, block, encoderKV, selfCache) {
+  // Self-attention with KV cache
+  const norm1 = layernorm(x, block.selfAttnLnW, block.selfAttnLnB)
+  const { output: selfAttnOut, newCache } = multiHeadAttentionCached(norm1, block.selfAttn, selfCache)
+  const x2 = add(x, selfAttnOut)
+
+  // Cross-attention with pre-computed encoder K/V
+  const norm2 = layernorm(x2, block.crossAttnLnW, block.crossAttnLnB)
+  const { output: crossAttnOut } = multiHeadCrossAttentionCached(norm2, encoderKV, block.crossAttn)
+  const x3 = add(x2, crossAttnOut)
+
+  // FFN
+  const norm3 = layernorm(x3, block.ffnLnW, block.ffnLnB)
+  const ffnOut = linear(gelu(linear(norm3, block.ffn1)), block.ffn2)
+  return { output: add(x3, ffnOut), newCache }
+}
+
+// Prefill: process all initial prompt tokens through the decoder in one pass.
+// Returns logits [seqLen, vocabSize] and per-block self-attention KV caches + encoder KV.
+function whisperDecodePrefill(model, encoderOut, tokens) {
+  const { config } = model
+  const seqLen = tokens.length
+
+  let x = embedding(tokens, model.tokenEmbed)
+
+  // Slice learned decoder PE to seqLen
+  const peData = model.decoderPE.data.data.slice(0, seqLen * config.dim)
+  const pe = variable(tensor(Array.from(peData), [seqLen, config.dim]), { requiresGrad: false })
+  x = add(x, pe)
+
+  const mask = createCausalMask(seqLen)
+  const selfCaches = []
+
+  // Pre-compute encoder K/V for all cross-attention layers
+  const encoderKV = precomputeEncoderKV(model, encoderOut)
+
+  for (const block of model.decoderBlocks) {
+    const { output, selfCache } = decoderBlockPrefill(x, block, encoderOut, mask)
+    x = output
+    selfCaches.push(selfCache)
+  }
+
+  x = layernorm(x, model.decoderLnW, model.decoderLnB)
+  const logits = matmul(x, transpose(model.tokenEmbed, [1, 0]))
+
+  return { logits, selfCaches, encoderKV }
+}
+
+// Single-token decode step using KV cache.
+// tokenId: integer, position: integer (0-based position for PE lookup)
+// selfCaches: array of { k, v } per decoder block
+// encoderKV: array of { k, v } per decoder block (from precomputeEncoderKV)
+function whisperDecodeStep(model, encoderKV, tokenId, position, selfCaches) {
+  const { config } = model
+
+  let x = embedding([tokenId], model.tokenEmbed) // [1, dim]
+
+  // Learned decoder PE at this position
+  const peData = model.decoderPE.data.data.slice(position * config.dim, (position + 1) * config.dim)
+  const pe = variable(tensor(Array.from(peData), [1, config.dim]), { requiresGrad: false })
+  x = add(x, pe)
+
+  const newSelfCaches = []
+
+  for (let i = 0; i < model.decoderBlocks.length; i++) {
+    const { output, newCache } = decoderBlockStep(
+      x, model.decoderBlocks[i], encoderKV[i], selfCaches[i]
+    )
+    x = output
+    newSelfCaches.push(newCache)
+  }
+
+  x = layernorm(x, model.decoderLnW, model.decoderLnB)
+  const logits = matmul(x, transpose(model.tokenEmbed, [1, 0]))
+
+  return { logits, selfCaches: newSelfCaches }
+}
+
+// --- Cached greedy decoding (drop-in replacement for whisperTranscribe) ---
+
+function whisperTranscribeCached(model, melInput, opts = {}) {
+  const maxTokens = opts.maxTokens || 224
+  const temperature = opts.temperature || 0
+  const eotToken = opts.eotToken || 50257
+  const sotToken = opts.sotToken || 50258
+  const langToken = opts.langToken || 50259
+  const transcribeToken = opts.transcribeToken || 50359
+  const noTimestamps = opts.noTimestamps || 50363
+
+  return noGrad(() => {
+    const encoderOut = whisperEncode(model, melInput)
+    const promptTokens = [sotToken, langToken, transcribeToken, noTimestamps]
+
+    // Prefill: process prompt tokens in one pass
+    let { logits: prefillLogits, selfCaches, encoderKV } = whisperDecodePrefill(model, encoderOut, promptTokens)
+
+    // Get logits for last prompt token position
+    const lastLogits = prefillLogits.data.data.slice(
+      (promptTokens.length - 1) * model.config.vocabSize,
+      promptTokens.length * model.config.vocabSize
+    )
+
+    const result = []
+    let position = promptTokens.length // next position for PE
+
+    // Sample first token from prefill logits
+    let nextToken = sampleToken(lastLogits, temperature)
+    if (nextToken === eotToken) return result
+
+    result.push(nextToken)
+    if (opts.onToken) {
+      const stop = opts.onToken(nextToken, 0)
+      if (stop) return result
+    }
+
+    // Auto-regressive decode: one token at a time
+    for (let step = 1; step < maxTokens; step++) {
+      const decoded = whisperDecodeStep(model, encoderKV, nextToken, position, selfCaches)
+      selfCaches = decoded.selfCaches
+      position++
+
+      const stepLogits = decoded.logits.data.data.slice(0, model.config.vocabSize)
+      nextToken = sampleToken(stepLogits, temperature)
+
+      if (nextToken === eotToken) break
+      result.push(nextToken)
+
+      if (opts.onToken) {
+        const stop = opts.onToken(nextToken, step)
+        if (stop) break
+      }
+    }
+
+    return result
+  })
+}
+
+// Shared sampling logic
+function sampleToken(logits, temperature) {
+  if (temperature === 0) {
+    let best = 0, maxVal = logits[0]
+    for (let i = 1; i < logits.length; i++) {
+      if (logits[i] > maxVal) { maxVal = logits[i]; best = i }
+    }
+    return best
+  }
+  const scaled = new Float32Array(logits.length)
+  let maxVal = -Infinity
+  for (let i = 0; i < scaled.length; i++) {
+    scaled[i] = logits[i] / temperature
+    if (scaled[i] > maxVal) maxVal = scaled[i]
+  }
+  let sum = 0
+  for (let i = 0; i < scaled.length; i++) {
+    scaled[i] = Math.exp(scaled[i] - maxVal)
+    sum += scaled[i]
+  }
+  for (let i = 0; i < scaled.length; i++) scaled[i] /= sum
+  let r = Math.random()
+  for (let i = 0; i < scaled.length; i++) {
+    r -= scaled[i]
+    if (r <= 0) return i
+  }
+  return scaled.length - 1
 }
 
 function whisperParams(model) {
@@ -264,6 +453,8 @@ export {
   WHISPER_CONFIGS,
   createWhisperModel,
   whisperEncode, whisperDecode, whisperTranscribe,
+  whisperDecodePrefill, whisperDecodeStep, whisperTranscribeCached,
+  precomputeEncoderKV,
   whisperParams,
   createEncoderBlock, encoderBlock, encoderBlockParams,
   createDecoderBlock, decoderBlock, decoderBlockParams,

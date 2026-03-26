@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.19.0 — KV-Cached Whisper Decoding (2026-03-26)
+
+### Added
+
+- **`whisperDecodePrefill(model, encoderOut, tokens)`** — Process the full initial prompt through the decoder in one pass. Returns logits, per-block self-attention KV caches, and pre-projected encoder K/V for cross-attention. The encoder K/V projections happen once and are reused for every subsequent decode step.
+- **`whisperDecodeStep(model, encoderKV, tokenId, position, selfCaches)`** — Single-token cached decode step. Uses `multiHeadAttentionCached` for self-attention (cache grows by 1 per step) and `multiHeadCrossAttentionCached` for cross-attention (pre-computed K/V are constant).
+- **`whisperTranscribeCached(model, melInput, opts)`** — Drop-in replacement for `whisperTranscribe` using prefill + step-by-step cached decoding. Same API surface and sampling logic. Reduces total self-attention work from O(n²) to O(n) over a full generation.
+- **`precomputeEncoderKV(model, encoderOut)`** — Pre-compute encoder K/V projections for all decoder cross-attention layers. Returns `[{ k, v }]` per block.
+- **Tests** — 9 KV-cached decoding tests: prefill shapes, step cache growth, encoder KV constancy, prefill/full-decode equivalence, cached/non-cached token equivalence, EOT stopping, single-token generation, onToken callback, early stopping.
+
+### Changed
+
+- **`examples/whisper/model.js`** — Sampling logic extracted to shared `sampleToken()` function used by both cached and non-cached transcription paths.
+
 ## 0.18.0 — GPU Conv1d (im2col + col2im) (2026-03-26)
 
 ### Changed

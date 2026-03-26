@@ -188,6 +188,34 @@ const tokens = whisperTranscribe(model, mel, {
 
 **`whisperParams(model)`** — Collects all trainable parameters for optimizer use. Returns a flat array of Variables.
 
+#### KV-Cached Decoding
+
+For efficient generation, the cached API avoids recomputing the full decoder sequence each step. Encoder cross-attention K/V are projected once; self-attention KV caches grow by one position per token.
+
+```js
+import {
+  whisperDecodePrefill, whisperDecodeStep, whisperTranscribeCached,
+  precomputeEncoderKV,
+} from './model.js'
+```
+
+**`precomputeEncoderKV(model, encoderOut)`** — Projects encoder output through each decoder block's cross-attention K/V weights. Returns `[{ k, v }]` per block, where k/v are `[numHeads, audioCtx, headDim]`. Called once after encoding.
+
+**`whisperDecodePrefill(model, encoderOut, tokens)`** — Processes the full prompt through the decoder in one pass. Returns `{ logits, selfCaches, encoderKV }`. The `selfCaches` are `[{ k, v }]` per block with shape `[numHeads, promptLen, headDim]`.
+
+**`whisperDecodeStep(model, encoderKV, tokenId, position, selfCaches)`** — Single-token cached decode. Returns `{ logits, selfCaches }` with updated self-attention caches (grown by 1 position).
+
+**`whisperTranscribeCached(model, melInput, opts?)`** — Drop-in replacement for `whisperTranscribe` using the prefill + step pattern. Same options, same return value. Reduces total self-attention work from O(n²) to O(n).
+
+```js
+// Same API as whisperTranscribe
+const tokens = whisperTranscribeCached(model, mel, {
+  maxTokens: 224,
+  temperature: 0,
+  onToken: (token, step) => { /* progress callback */ },
+})
+```
+
 ### loader.js — GGML Model Loader
 
 Loads whisper.cpp GGML binary files and populates a Smith model with real weights.
@@ -312,7 +340,6 @@ bun test examples/whisper/tests/
 - **No word-level timestamps.** Output is a single text string. Whisper supports timestamps via special tokens, but decoding them requires token suppression logic not yet implemented.
 - **No voice activity detection.** The full audio is processed as one 30-second chunk.
 - **CPU mel spectrogram.** FFT and filterbank run on CPU. Fast enough for single files (~50ms) but a GPU FFT shader would help for batch processing.
-- **CPU conv1d col2im.** The conv1d backward pass uses CPU-side scatter-add. Forward is GPU (matmul). Fine for inference, but training through the conv layers would benefit from a GPU col2im kernel.
 - **No streaming.** The entire audio file is loaded into memory and processed at once.
 
 ## Extending
