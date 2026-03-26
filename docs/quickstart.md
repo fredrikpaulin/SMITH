@@ -98,6 +98,33 @@ const ids = encode("hello world", tok.merges)
 const str = decode(ids, tok.vocab)
 ```
 
+## Model Registry
+
+Smith includes a model registry for fetching pretrained weights from Hugging Face.
+
+```js
+import smith from './src/index.js'
+
+// See what's available
+smith.listModels()
+// → [{ id: 'whisper-tiny', format: 'ggml', cached: false, ... }, ...]
+
+// Fetch a model (downloads once, then cached in models/<id>/)
+await smith.fetchModel('resnet50')
+
+// Resolve the local file path
+const path = smith.modelPath('resnet50') // 'models/resnet50/model.safetensors'
+
+// Load it
+const { forward } = await smith.loadResNet(path, { variant: 'resnet50' })
+```
+
+You can also fetch from direct URLs without a registry entry:
+
+```js
+await smith.fetchUrl('https://example.com/weights.bin', { id: 'my-model' })
+```
+
 ## Benchmarks
 
 ```sh

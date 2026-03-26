@@ -59,7 +59,7 @@ audio.wav ──► WAV decoder ──► 16kHz mono ──► mel spectrogram �
 
 Everything inside the transformer — matmul, attention, layernorm, gelu, softmax, embedding lookup. The audio preprocessing (WAV decode, FFT, mel filterbank) runs on CPU since it's I/O-bound and only happens once per file.
 
-Conv1d in the encoder uses Smith's matmul via im2col — no dedicated 1D conv shader yet.
+Conv1d in the encoder runs on a dedicated Metal shader (`shaders/conv1d.metal`) with im2col forward and col2im backward.
 
 ## Models
 

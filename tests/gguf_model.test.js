@@ -9,8 +9,9 @@ import {
   dequantQ4_0, dequantQ4_1, dequantQ5_0, dequantQ8_0,
   dequantQ4_K, dequantQ6_K,
 } from '../src/gguf.js'
+import { modelPath } from '../src/models.js'
 
-const MODEL_PATH = 'models/NVIDIA-Nemotron3-Nano-4B-Q4_K_M.gguf'
+const MODEL_PATH = modelPath('nemotron-4b-q4') || 'models/NVIDIA-Nemotron3-Nano-4B-Q4_K_M.gguf'
 
 // Parse once, reuse across tests
 let parsed, config

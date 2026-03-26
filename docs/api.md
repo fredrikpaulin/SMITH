@@ -106,6 +106,11 @@ const norm = clipGradNorm(params, maxNorm)
 | `transformerBlockFlash(x, block)` | Flash attention block (O(n) memory) |
 | `transformerBlockCached(x, block, cache)` | Single-token block with KV cache |
 | `createCausalMask(seqLen)` | Upper-triangle -Infinity mask |
+| `countParams(layers)` | Count total trainable parameters across layers |
+| `linearParams(layer)` | Get trainable params `[weight, bias]` from a linear layer |
+| `blockParams(block)` | Get all trainable params from a transformer block |
+| `addGrad(variable, gradTensor)` | Accumulate gradient into a variable (broadcast-aware) |
+| `topKPredictions(logits, k)` | Return top-k `[{token, prob}]` from logits |
 
 ## Model
 

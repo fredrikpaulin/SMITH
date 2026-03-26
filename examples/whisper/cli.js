@@ -15,7 +15,7 @@ import { existsSync } from 'fs'
 import { loadAudio } from './audio.js'
 import { melSpectrogram } from './mel.js'
 import { loadWhisperGGML } from './loader.js'
-import { whisperEncode, whisperDecode, whisperTranscribe } from './model.js'
+import { whisperTranscribe } from './model.js'
 import { createTokenizer, SPECIAL_TOKENS, languageToken } from './tokenizer.js'
 import smith from '../../src/index.js'
 

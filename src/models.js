@@ -4,7 +4,8 @@
 // verifies SHA-256 checksums, and caches them in models/<id>/.
 
 import { resolve, dirname, join } from 'path'
-import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from 'fs'
+import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync, readFileSync, rmdirSync } from 'fs'
+import { rename } from 'fs/promises'
 import { createHash } from 'crypto'
 
 const MODELS_DIR = resolve(dirname(import.meta.dir), 'models')
@@ -23,7 +24,7 @@ function loadRegistry() {
     _registry = { models: {} }
     return _registry
   }
-  _registry = JSON.parse(file.textSync ? file.textSync() : require('fs').readFileSync(REGISTRY_PATH, 'utf8'))
+  _registry = JSON.parse(readFileSync(REGISTRY_PATH, 'utf8'))
   return _registry
 }
 
@@ -182,8 +183,7 @@ async function fetchModel(id, opts = {}) {
     }
 
     // Atomic rename
-    const fs = await import('fs/promises')
-    await fs.rename(tmpDest, dest)
+    await rename(tmpDest, dest)
     fetched.push(file.name)
   }
 
@@ -234,8 +234,7 @@ async function fetchUrl(url, opts = {}) {
     }
   }
 
-  const fs = await import('fs/promises')
-  await fs.rename(tmpDest, dest)
+  await rename(tmpDest, dest)
   return { path: dest, filename }
 }
 
@@ -248,8 +247,7 @@ async function fetchUrl(url, opts = {}) {
 function registerModel(id, entry) {
   const reg = loadRegistry()
   reg.models[id] = entry
-  const fs = require('fs')
-  fs.writeFileSync(REGISTRY_PATH, JSON.stringify(reg, null, 2) + '\n')
+  writeFileSync(REGISTRY_PATH, JSON.stringify(reg, null, 2) + '\n')
   _registry = reg
 }
 
@@ -264,7 +262,7 @@ function removeModel(id) {
   for (const f of files) {
     unlinkSync(join(dir, f))
   }
-  require('fs').rmdirSync(dir)
+  rmdirSync(dir)
 }
 
 /** Get the models directory path. */

@@ -12,6 +12,7 @@ Smith gives JavaScript direct access to Metal compute shaders through a thin C b
 - **GPT-2 transformer** with multi-head attention, pre-norm blocks, weight tying, and KV cache
 - **Convolutions** — direct conv2d, Winograd F(2x2,3x3), im2col+GEMM, pooling, batch normalization
 - **Vision models** — ResNet-18/34/50/101/152, CLIP ViT-B/32, ViT-B/16, ViT-L/14
+- **Model registry** — fetch, cache, and manage models from Hugging Face or direct URLs
 - **Model loading** — GGUF (llama.cpp format: Llama, Phi, GPT-2) and safetensors (torchvision, OpenAI CLIP)
 - **Quantization** — Q4 and Q8 matmul for inference, 4-bit weight quantization
 - **Mixed precision** — f16 mode with loss scaling
@@ -79,19 +80,39 @@ for (let step = 0; step < 100; step++) {
 }
 ```
 
+### Fetch and load models
+
+```js
+// List available models
+smith.listModels()
+// → [{ id: 'whisper-tiny', cached: false, ... }, { id: 'resnet50', ... }, ...]
+
+// Fetch from Hugging Face (cached after first download)
+await smith.fetchModel('resnet50')
+
+// Load — use modelPath() to resolve the cached file
+const { forward } = await smith.loadResNet(smith.modelPath('resnet50'), {
+  variant: 'resnet50',
+})
+```
+
 ### Load a GGUF model
 
 ```js
-const llama = await smith.loadGGUF('tinyllama.gguf')
+await smith.fetchModel('nemotron-4b-q4')
+const llama = await smith.loadGGUF(smith.modelPath('nemotron-4b-q4'))
 const output = llama.generate([1, 2, 3], {
   maxTokens: 50, temperature: 0.8, topK: 40,
 })
+
+// Or pass a path directly
+const llama2 = await smith.loadGGUF('path/to/model.gguf')
 ```
 
 ### Load a ResNet
 
 ```js
-const { forward } = await smith.loadResNet('resnet50.safetensors', {
+const { forward } = await smith.loadResNet(smith.modelPath('resnet50'), {
   variant: 'resnet50',
 })
 const input = smith.preprocessResNet(rgbaPixels, width, height)
@@ -101,7 +122,7 @@ const logits = forward(smith.variable(input, { requiresGrad: false }), false)
 ### Load CLIP
 
 ```js
-const clip = await smith.loadCLIP('clip-vit-b-32.safetensors', {
+const clip = await smith.loadCLIP(smith.modelPath('clip-vit-b-32'), {
   variant: 'ViT-B/32',
 })
 const imgEmbed = clip.encodeImage(imageInput)
@@ -162,6 +183,9 @@ All intelligence lives in JavaScript. The native layer is a dumb pipe: allocate 
 
 ```
 smith/
+├── models/
+│   ├── registry.json         Model metadata and source URLs
+│   └── registry.schema.json  JSON Schema for registry
 ├── native/          Objective-C Metal bridge (~250 lines)
 │   ├── gpu_bridge.h
 │   └── gpu_bridge.m
@@ -172,9 +196,12 @@ smith/
 │   ├── flash_attention.metal Fused scaled dot-product attention
 │   ├── conv2d.metal          Direct 2D convolution + backward
 │   ├── conv2d_winograd.metal Winograd F(2x2,3x3) forward + backward
+│   ├── conv1d.metal          1D convolution (im2col forward + col2im backward)
 │   ├── im2col.metal          im2col/col2im for GEMM-based conv
 │   ├── pool2d.metal          Max/avg pooling
 │   ├── batchnorm.metal       Batch normalization
+│   ├── fft.metal             Radix-2 FFT in threadgroup shared memory
+│   ├── mel.metal             STFT windowing, magnitude, mel filterbank
 │   ├── rope.metal            Rotary position embeddings
 │   ├── rmsnorm.metal         RMS normalization
 │   ├── swiglu.metal          Fused SiLU gate
@@ -193,6 +220,7 @@ smith/
 │   ├── optim.js        AdamW + cosine schedule + grad clipping
 │   ├── nn.js           Linear, MHA, transformer blocks
 │   ├── model.js        GPT assembly + weight tying
+│   ├── models.js       Model registry, fetch, cache
 │   ├── resnet.js       ResNet-18/34/50/101/152 builder + loader
 │   ├── clip.js         CLIP ViT + text encoder + loader
 │   ├── vision.js       Image preprocessing (resize, crop, normalize)
@@ -225,9 +253,12 @@ smith/
 | `flash_attention` | Fused scaled dot-product attention (causal + non-causal) |
 | `conv2d_forward/backward` | Direct 2D convolution with groups, dilation, stride |
 | `conv2d_winograd` | Winograd F(2x2,3x3): 2.25x fewer multiplications for 3x3 kernels |
+| `conv1d_im2col/col2im` | 1D convolution forward (im2col+GEMM) and backward (col2im) |
 | `im2col/col2im` | Rearrange patches for GEMM-based convolution on larger kernels |
 | `pool2d` | Max pooling (with argmax) and average pooling |
 | `batchnorm` | Training + inference mode batch normalization |
+| `fft_radix2` | Radix-2 Cooley-Tukey FFT in threadgroup shared memory (up to 1024) |
+| `stft_*` / `mel_*` | STFT windowing, magnitude, mel filterbank, log normalization |
 | `rope` | Rotary position embeddings (forward + backward) |
 | `rmsnorm` | Llama-style RMS normalization |
 | `swiglu` | Fused SiLU(gate) * up |
