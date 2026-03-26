@@ -7,6 +7,8 @@
 // of Q and iterates over all K/V column-blocks, maintaining running softmax
 // statistics (online log-sum-exp).
 //
+// Supports GQA (grouped query attention) and sliding window attention.
+//
 // Reference: Dao et al., "FlashAttention-2: Faster Attention with Better
 // Parallelism and Work Partitioning" (2023)
 
@@ -20,25 +22,27 @@ constant uint Br = 32;
 constant uint Bc = 32;
 
 struct FlashAttnParams {
-  uint N;         // sequence length
-  uint d;         // head dimension
-  uint numHeads;  // number of attention heads
-  float scale;    // 1 / sqrt(d)
-  uint causal;    // 1 for causal mask, 0 for no mask
+  uint N;           // sequence length
+  uint d;           // head dimension
+  uint numQHeads;   // number of query heads
+  float scale;      // 1 / sqrt(d)
+  uint causal;      // 1 for causal mask, 0 for no mask
+  uint numKVHeads;  // number of key/value heads (GQA: numKVHeads <= numQHeads)
+  uint windowSize;  // sliding window size (0 = full context)
 };
 
-// Forward kernel: one threadgroup per (head, Q-row-block) pair.
-// Grid: (numHeads, ceil(N/Br), 1)
+// Forward kernel: one threadgroup per (Q head, Q-row-block) pair.
+// Grid: (numQHeads, ceil(N/Br), 1)
 // Threadgroup: (Bc, 1, 1) — each thread handles one column during K/V iteration
 //
 // Inputs:
-//   Q [numHeads, N, d]  — queries
-//   K [numHeads, N, d]  — keys
-//   V [numHeads, N, d]  — values
+//   Q [numQHeads, N, d]   — queries
+//   K [numKVHeads, N, d]  — keys
+//   V [numKVHeads, N, d]  — values
 // Outputs:
-//   O [numHeads, N, d]  — attention output
-//   L [numHeads, N]     — log-sum-exp per row (for backward)
-//   M [numHeads, N]     — row-wise max per row (for backward)
+//   O [numQHeads, N, d]   — attention output
+//   L [numQHeads, N]      — log-sum-exp per row (for backward)
+//   M [numQHeads, N]      — row-wise max per row (for backward)
 
 kernel void flash_attention_forward(
   device const float* Q   [[buffer(0)]],
@@ -52,12 +56,15 @@ kernel void flash_attention_forward(
   uint3 tpg_vec           [[threads_per_threadgroup]]
 ) {
   const uint tpg = tpg_vec.x;
-  const uint h = pos.x / tpg;        // which head
+  const uint h = pos.x / tpg;        // which Q head
   const uint tid = pos.x % tpg;      // thread index within group
   const uint block_row = pos.y;       // which Q row-block
   const uint N = p.N;
   const uint d = p.d;
   const float scale = p.scale;
+
+  // GQA: map Q head to KV head
+  const uint kv_h = h * p.numKVHeads / p.numQHeads;
 
   // Bounds for this Q row-block
   const uint row_start = block_row * Br;
@@ -65,33 +72,18 @@ kernel void flash_attention_forward(
   const uint num_rows = row_end - row_start;
   if (num_rows == 0) return;
 
-  // Pointers into this head's Q, K, V, O
+  // Pointers into Q (indexed by Q head) and K, V (indexed by KV head)
   device const float* Qh = Q + h * N * d;
-  device const float* Kh = K + h * N * d;
-  device const float* Vh = V + h * N * d;
+  device const float* Kh = K + kv_h * N * d;
+  device const float* Vh = V + kv_h * N * d;
   device float* Oh = O + h * N * d;
   device float* Lh = L + h * N;
   device float* Mh = M_out + h * N;
 
-  // Threadgroup shared memory:
-  // S_block [Br, Bc]   — score tile
-  // O_acc [Br, d]      — output accumulator (each thread covers part of d)
-  // m_i [Br]           — running row max
-  // l_i [Br]           — running row sum of exp
+  // Threadgroup shared memory
   threadgroup float S_block[Br * Bc];
-
-  // Each thread maintains accumulators for its assigned rows in registers.
-  // Since Br rows * d cols can be large, we loop over d in chunks.
-
-  // We process one Q row-block. Each thread handles parts of the computation.
-  // Strategy: threads cooperate to compute S = Q_block @ K_block^T, then
-  // each thread handles softmax and V accumulation for its assigned rows.
-
-  // Init running max and sum for each row in this block
   threadgroup float m_i[Br];
   threadgroup float l_i[Br];
-
-  // Init output accumulator to zero
   threadgroup float O_acc[Br * 128]; // max headDim = 128
 
   if (tid < num_rows) {
@@ -114,9 +106,10 @@ kernel void flash_attention_forward(
     // Causal: skip blocks entirely above the diagonal
     if (p.causal && col_start > row_end - 1) break;
 
+    // Sliding window: skip blocks too far in the past
+    if (p.windowSize > 0 && row_start >= p.windowSize && col_end <= row_start - p.windowSize) continue;
+
     // Compute S_block = Q_block @ K_block^T * scale
-    // S_block[i][j] = sum_k Q[row_start+i, k] * K[col_start+j, k] * scale
-    // Each thread computes one or more elements of S_block
     for (uint idx = tid; idx < num_rows * num_cols; idx += tpg) {
       uint i = idx / num_cols;
       uint j = idx % num_cols;
@@ -128,6 +121,11 @@ kernel void flash_attention_forward(
 
       // Apply causal mask: if col > row, set to -inf
       if (p.causal && (col_start + j) > (row_start + i)) {
+        dot = -INFINITY;
+      }
+      // Apply sliding window mask: if row - col > windowSize, set to -inf
+      if (p.windowSize > 0 && (row_start + i) >= (col_start + j) &&
+          (row_start + i) - (col_start + j) > p.windowSize) {
         dot = -INFINITY;
       }
       S_block[i * Bc + j] = dot;
@@ -197,7 +195,7 @@ kernel void flash_attention_forward(
 
 // Backward kernel: computes dQ, dK, dV given dO and the saved L, M stats.
 // Recomputes attention weights from Q, K (no stored attention matrix).
-// One threadgroup per (head, Q-row-block) — same decomposition as forward.
+// One threadgroup per (Q head, Q-row-block) — same decomposition as forward.
 
 kernel void flash_attention_backward(
   device const float* Q     [[buffer(0)]],
@@ -222,21 +220,24 @@ kernel void flash_attention_backward(
   const uint d = p.d;
   const float scale = p.scale;
 
+  // GQA: map Q head to KV head
+  const uint kv_h = h * p.numKVHeads / p.numQHeads;
+
   const uint row_start = block_row * Br;
   const uint row_end = min(row_start + Br, N);
   const uint num_rows = row_end - row_start;
   if (num_rows == 0) return;
 
   device const float* Qh = Q + h * N * d;
-  device const float* Kh = K + h * N * d;
-  device const float* Vh = V + h * N * d;
+  device const float* Kh = K + kv_h * N * d;
+  device const float* Vh = V + kv_h * N * d;
   device const float* Oh = O + h * N * d;
   device const float* dOh = dO + h * N * d;
   device const float* Lh = L + h * N;
   device const float* Mh = M_in + h * N;
   device float* dQh = dQ + h * N * d;
-  device float* dKh = dK + h * N * d;
-  device float* dVh = dV + h * N * d;
+  device float* dKh = dK + kv_h * N * d;
+  device float* dVh = dV + kv_h * N * d;
 
   threadgroup float S_block[Br * Bc];
 
@@ -267,6 +268,9 @@ kernel void flash_attention_backward(
 
     if (p.causal && col_start > row_end - 1) break;
 
+    // Sliding window: skip blocks too far in the past
+    if (p.windowSize > 0 && row_start >= p.windowSize && col_end <= row_start - p.windowSize) continue;
+
     // Recompute S = Q_block @ K_block^T * scale
     for (uint idx = tid; idx < num_rows * num_cols; idx += tpg) {
       uint i = idx / num_cols;
@@ -277,6 +281,10 @@ kernel void flash_attention_backward(
       }
       dot *= scale;
       if (p.causal && (col_start + j) > (row_start + i)) {
+        dot = -INFINITY;
+      }
+      if (p.windowSize > 0 && (row_start + i) >= (col_start + j) &&
+          (row_start + i) - (col_start + j) > p.windowSize) {
         dot = -INFINITY;
       }
       S_block[i * Bc + j] = dot;
@@ -300,7 +308,6 @@ kernel void flash_attention_backward(
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
     // Step 1: dV[j,k] += sum_i P[i,j] * dO[i,k]
-    // Each thread handles a unique (j,k) pair — no within-threadgroup race
     for (uint idx = tid; idx < num_cols * d; idx += tpg) {
       uint j = idx / d;
       uint k = idx % d;
@@ -313,7 +320,6 @@ kernel void flash_attention_backward(
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
     // Step 2: Compute dS[i,j] = P[i,j] * (dP[i,j] - D[i]) * scale
-    // Store in S_block (overwrites P — we're done with P after dV above)
     for (uint idx = tid; idx < num_rows * num_cols; idx += tpg) {
       uint i = idx / num_cols;
       uint j = idx % num_cols;
@@ -326,7 +332,6 @@ kernel void flash_attention_backward(
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
     // Step 3: dQ[i,k] += sum_j dS[i,j] * K[j,k]
-    // Each thread handles a unique (i,k) pair — no race
     for (uint idx = tid; idx < num_rows * d; idx += tpg) {
       uint i = idx / d;
       uint k = idx % d;
@@ -338,7 +343,6 @@ kernel void flash_attention_backward(
     }
 
     // Step 4: dK[j,k] += sum_i dS[i,j] * Q[i,k]
-    // Each thread handles a unique (j,k) pair — no within-threadgroup race
     for (uint idx = tid; idx < num_cols * d; idx += tpg) {
       uint j = idx / d;
       uint k = idx % d;
@@ -382,14 +386,16 @@ kernel void flash_attention_forward_f16(
   const uint N = p.N, d = p.d;
   const float scale = p.scale;
 
+  const uint kv_h = h * p.numKVHeads / p.numQHeads;
+
   const uint row_start = block_row * Br;
   const uint row_end = min(row_start + Br, N);
   const uint num_rows = row_end - row_start;
   if (num_rows == 0) return;
 
   device const half* Qh = Q + h * N * d;
-  device const half* Kh = K + h * N * d;
-  device const half* Vh = V + h * N * d;
+  device const half* Kh = K + kv_h * N * d;
+  device const half* Vh = V + kv_h * N * d;
   device half* Oh = O + h * N * d;
   device float* Lh = L + h * N;
   device float* Mh = M_out + h * N;
@@ -412,6 +418,7 @@ kernel void flash_attention_forward_f16(
     const uint col_end = min(col_start + Bc, N);
     const uint num_cols = col_end - col_start;
     if (p.causal && col_start > row_end - 1) break;
+    if (p.windowSize > 0 && row_start >= p.windowSize && col_end <= row_start - p.windowSize) continue;
 
     for (uint idx = tid; idx < num_rows * num_cols; idx += tpg) {
       uint i = idx / num_cols, j = idx % num_cols;
@@ -419,6 +426,8 @@ kernel void flash_attention_forward_f16(
       for (uint k = 0; k < d; k++) dot += float(Qh[(row_start + i) * d + k]) * float(Kh[(col_start + j) * d + k]);
       dot *= scale;
       if (p.causal && (col_start + j) > (row_start + i)) dot = -INFINITY;
+      if (p.windowSize > 0 && (row_start + i) >= (col_start + j) &&
+          (row_start + i) - (col_start + j) > p.windowSize) dot = -INFINITY;
       S_block[i * Bc + j] = dot;
     }
     for (uint idx = tid; idx < Br * Bc; idx += tpg) {
@@ -482,21 +491,23 @@ kernel void flash_attention_backward_f16(
   const uint N = p.N, d = p.d;
   const float scale = p.scale;
 
+  const uint kv_h = h * p.numKVHeads / p.numQHeads;
+
   const uint row_start = block_row * Br;
   const uint row_end = min(row_start + Br, N);
   const uint num_rows = row_end - row_start;
   if (num_rows == 0) return;
 
   device const half* Qh = Q + h * N * d;
-  device const half* Kh = K + h * N * d;
-  device const half* Vh = V + h * N * d;
+  device const half* Kh = K + kv_h * N * d;
+  device const half* Vh = V + kv_h * N * d;
   device const half* Oh = O + h * N * d;
   device const half* dOh = dO + h * N * d;
   device const float* Lh = L + h * N;
   device const float* Mh = M_in + h * N;
   device half* dQh = dQ + h * N * d;
-  device half* dKh = dK + h * N * d;
-  device half* dVh = dV + h * N * d;
+  device half* dKh = dK + kv_h * N * d;
+  device half* dVh = dV + kv_h * N * d;
 
   threadgroup float S_block[Br * Bc];
   threadgroup float D_i[Br];
@@ -518,6 +529,7 @@ kernel void flash_attention_backward_f16(
     const uint col_end = min(col_start + Bc, N);
     const uint num_cols = col_end - col_start;
     if (p.causal && col_start > row_end - 1) break;
+    if (p.windowSize > 0 && row_start >= p.windowSize && col_end <= row_start - p.windowSize) continue;
 
     for (uint idx = tid; idx < num_rows * num_cols; idx += tpg) {
       uint i = idx / num_cols, j = idx % num_cols;
@@ -525,6 +537,8 @@ kernel void flash_attention_backward_f16(
       for (uint k = 0; k < d; k++) dot += float(Qh[(row_start + i) * d + k]) * float(Kh[(col_start + j) * d + k]);
       dot *= scale;
       if (p.causal && (col_start + j) > (row_start + i)) dot = -INFINITY;
+      if (p.windowSize > 0 && (row_start + i) >= (col_start + j) &&
+          (row_start + i) - (col_start + j) > p.windowSize) dot = -INFINITY;
       S_block[i * Bc + j] = dot;
     }
     for (uint idx = tid; idx < Br * Bc; idx += tpg) { uint i = idx / Bc, j = idx % Bc; if (i >= num_rows || j >= num_cols) S_block[idx] = -INFINITY; }

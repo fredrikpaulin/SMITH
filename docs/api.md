@@ -33,13 +33,13 @@ Variables wrap tensors with gradient tracking.
 
 All ops return new Variables with backward functions.
 
-**Arithmetic:** `add(a, b)`, `sub(a, b)`, `mul(a, b)`, `scale(a, scalar)`, `neg(a)`
+**Arithmetic:** `add(a, b)`, `sub(a, b)`, `mul(a, b)`, `div(a, b)`, `scale(a, scalar)`, `neg(a)`
 
 **Matrix:** `matmul(a, b)` — supports 2D and batched
 
-**Attention:** `flashAttention(q, k, v, causal?)` — fused tiled attention, O(n) memory
+**Attention:** `flashAttention(q, k, v, opts?)` — fused tiled attention, O(n) memory, GQA + sliding window
 
-**Activation:** `relu(a)`, `gelu(a)`
+**Activation:** `relu(a)`, `gelu(a)`, `tanh(a)`, `sigmoid(a)`, `reluSquared(a)`
 
 **Normalization:** `softmax(a, axis?)`, `layernorm(a, gamma, beta, eps?)`
 
@@ -65,6 +65,8 @@ All ops return new Variables with backward functions.
 
 **Raw gather/scatter:** `gpuGatherOp(tensor, axis, indices)`, `gpuScatterAdd(dst, axis, indices, src)`, `gpuScatterOp(input, axis, indices, src)` — Direct GPU dispatch without autograd.
 
+**Flash Attention opts:** `flashAttention(q, k, v, opts?)` where `opts` is `{ causal, numKVHeads, windowSize }` or a boolean (backward compat). Q: `[numQHeads, N, d]`, K: `[numKVHeads, N, d]`, V: `[numKVHeads, N, d]`. When `numKVHeads` is omitted, defaults to `K.shape[0]`. When `windowSize` is 0 (default), full context is used. Example GQA with sliding window: `flashAttention(q, k, v, { causal: true, numKVHeads: 2, windowSize: 1024 })`.
+
 ## FFT and Mel Spectrogram
 
 Low-level GPU FFT and mel spectrogram extraction. Useful for audio processing pipelines.
@@ -80,9 +82,19 @@ Low-level GPU FFT and mel spectrogram extraction. Useful for audio processing pi
 
 ## Optimizer
 
+**AdamW:**
 ```js
 const opt = createAdamW(params, { lr, beta1, beta2, eps, weightDecay })
 adamwStep(opt)  // GPU-fused parameter update
+```
+
+**MuonAdamW** (Muon for 2D matrix params, AdamW for the rest):
+```js
+const opt = createMuonAdamW([
+  { kind: 'adamw', params: [bias, norm_weight], lr: 0.01, betas: [0.9, 0.95], eps: 1e-8, weightDecay: 0.0 },
+  { kind: 'muon', params: [attn_w, mlp_w], lr: 0.02, momentum: 0.95, beta2: 0.7, weightDecay: 0.0, nsSteps: 5 },
+])
+muonAdamWStep(opt)
 ```
 
 **LR Schedule:**

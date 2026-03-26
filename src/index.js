@@ -5,6 +5,7 @@ import * as device from './device.js'
 import * as T from './tensor.js'
 import * as autograd from './autograd.js'
 import * as optim from './optim.js'
+import { createMuonAdamW, muonAdamWStep } from './muon.js'
 import * as nn from './nn.js'
 import * as model from './model.js'
 import { forwardCached, forwardFlash } from './model.js'
@@ -18,6 +19,9 @@ import { poolStats, poolDrain } from './pool.js'
 import { gpuFFT, gpuIFFT, gpuBatchFFT } from './ops/fft.js'
 import { gpuArgmax, gpuSample } from './ops/sampling.js'
 import { gather as gpuGatherOp, scatterAdd as gpuScatterAdd, scatter as gpuScatterOp } from './ops/gather.js'
+import { tanh as gpuTanhOp } from './ops/tanh.js'
+import { sigmoid as gpuSigmoidOp } from './ops/sigmoid.js'
+import { reluSquared as gpuReluSquaredOp } from './ops/relusquared.js'
 import { gpuMelSpectrogram } from './ops/mel.js'
 import { dtypeBytes, toFloat16, fromFloat16, float32ToFloat16, float16ToFloat32 } from './dtype.js'
 import { f16Mode, defaultDtype, createLossScaler } from './f16mode.js'
@@ -70,7 +74,8 @@ const { tensor, zeros, ones, full, rand, randn, scalar, toArray, toString: tenso
 const {
   variable, param, backward, zeroGrad, noGrad,
   add, sub, mul, div, matmul, scale, neg,
-  relu, gelu, softmax, layernorm, crossEntropy,
+  relu, gelu, tanh, sigmoid, reluSquared,
+  softmax, layernorm, crossEntropy,
   flashAttention,
   sum, reshape, transpose,
   embedding, addGrad,
@@ -128,7 +133,8 @@ const smith = {
 
   // Ops (on variables)
   add, sub, mul, div, matmul, scale, neg,
-  relu, gelu, softmax, layernorm, crossEntropy,
+  relu, gelu, tanh, sigmoid, reluSquared,
+  softmax, layernorm, crossEntropy,
   flashAttention,
   sum, reshape, transpose,
   embedding, addGrad,
@@ -171,6 +177,7 @@ const smith = {
 
   // Optimizer
   createAdamW, adamwStep,
+  createMuonAdamW, muonAdamWStep,
   createSchedule, getLr,
   clipGradNorm,
 
@@ -233,7 +240,8 @@ export {
   tensor, zeros, ones, full, rand, randn, scalar, toArray,
   variable, param, backward, zeroGrad, noGrad,
   add, sub, mul, div, matmul, scale, neg,
-  relu, gelu, softmax, layernorm, crossEntropy,
+  relu, gelu, tanh, sigmoid, reluSquared,
+  softmax, layernorm, crossEntropy,
   flashAttention,
   sum, reshape, transpose,
   embedding, addGrad,
@@ -256,6 +264,7 @@ export {
   mapGPT2Weights,
   quantizeQ4, matmulQ4,
   createAdamW, adamwStep,
+  createMuonAdamW, muonAdamWStep,
   createSchedule, getLr,
   clipGradNorm,
   info, poolStats, poolDrain,

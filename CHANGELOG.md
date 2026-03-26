@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.28.0 — MuonAdamW Optimizer (2026-03-26)
+
+### Added
+
+- **`src/muon.js`** — MuonAdamW optimizer ported from Karpathy's autoresearch. Hybrid optimizer: Muon for 2D matrix params (Newton-Schulz orthogonalization via polar express), AdamW for everything else. Includes Nesterov momentum, NorMuon variance reduction, and cautious weight decay.
+- **`shaders/muon.metal`** — GPU kernels: `muon_nesterov` (Nesterov momentum), `muon_ns_poly` (Newton-Schulz polynomial B = b·A + c·A²), `muon_ns_combine` (X = a·X + product), `muon_update` (cautious weight decay + param update).
+- **`createMuonAdamW(groups)`** — Creates optimizer with param groups of kind `'adamw'` or `'muon'`.
+- **`muonAdamWStep(opt)`** — Performs one optimizer step across all groups.
+- **Tests** — 14 tests covering AdamW groups (update, weight decay, convergence), Muon groups (2D update, finite values, zero grad, weight decay, tall/wide matrices, stability over 20 steps), mixed groups, Newton-Schulz coefficient verification, and skipped params.
+
+## 0.27.0 — Tanh, Sigmoid, ReluSquared Activations (2026-03-26)
+
+### Added
+
+- **`autograd.tanh(a)`** — Hyperbolic tangent with backward: `dA = dOut * (1 - tanh(x)²)`. Uses saved output for backward (no recompute).
+- **`autograd.sigmoid(a)`** — Sigmoid activation with backward: `dA = dOut * σ(x) * (1 - σ(x))`. Uses saved output.
+- **`autograd.reluSquared(a)`** — Fused `relu(x)²` with backward: `dA = dOut * 2 * max(0, x)`. Single kernel dispatch (no intermediate relu buffer).
+- **`shaders/activation.metal`** — Added `relusquared_forward`, `relusquared_backward` kernels (f32 + f16).
+- **`src/ops/tanh.js`** — GPU dispatch for tanh forward/backward.
+- **`src/ops/sigmoid.js`** — GPU dispatch for sigmoid forward/backward.
+- **`src/ops/relusquared.js`** — GPU dispatch for relu-squared forward/backward.
+- **Tests** — 20+ tests covering tanh/sigmoid/reluSquared forward values, backward gradients, chaining, 2D tensors, soft-capping composition, and relu-squared equivalence to manual relu+square.
+
+## 0.26.0 — GQA + Sliding Window Flash Attention (2026-03-26)
+
+### Changed
+
+- **`shaders/flash_attention.metal`** — Extended `FlashAttnParams` struct with `numKVHeads` and `windowSize`. All four kernels (f32/f16, forward/backward) now support grouped query attention (GQA) and sliding window masking. KV head mapping via integer division; window mask applied per-element with block-level skip optimization.
+- **`src/ops/flash_attention.js`** — `flashAttentionForward` and `flashAttentionBackward` accept options object `{ causal, numKVHeads, windowSize }` with backward-compatible boolean support. Output/gradient shapes respect asymmetric Q vs KV head counts.
+- **`src/autograd.js`** — `flashAttention` op accepts options object, passes through to GPU dispatch. Boolean arg still works for backward compat.
+
+### Added
+
+- **Tests** — 15+ tests covering backward compat, sliding window (shape, full context equivalence, distant position isolation, nearby position visibility, backward), GQA (shape, MHA equivalence, backward gradient shapes), and combined GQA+window.
+
 ## 0.25.0 — Autograd `div` and Gather/Scatter (2026-03-26)
 
 ### Added

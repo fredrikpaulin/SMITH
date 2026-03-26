@@ -25,6 +25,9 @@ import { batchnormForward as gpuBnFwd, batchnormInference as gpuBnInfer, batchno
 import { ropeForward as gpuRopeFwd, ropeBackward as gpuRopeBwd, precomputeRoPE } from './ops/rope.js'
 import { rmsnormForward as gpuRmsnormFwd, rmsnormBackward as gpuRmsnormBwd } from './ops/rmsnorm.js'
 import { swigluForward as gpuSwigluFwd, swigluBackward as gpuSwigluBwd } from './ops/swiglu.js'
+import { tanh as gpuTanh, tanhBackward as gpuTanhBwd } from './ops/tanh.js'
+import { sigmoid as gpuSigmoid, sigmoidBackward as gpuSigmoidBwd } from './ops/sigmoid.js'
+import { reluSquared as gpuReluSquared, reluSquaredBackward as gpuReluSquaredBwd } from './ops/relusquared.js'
 import { gather as gpuGather, scatterAdd as gpuScatterAdd, scatter as gpuScatter } from './ops/gather.js'
 import * as conv1dGpu from './ops/conv1d.js'
 import { gpuFFT as gpuFFTOp, gpuIFFT as gpuIFFTOp, gpuBatchFFT as gpuBatchFFTOp } from './ops/fft.js'
@@ -212,6 +215,35 @@ function gelu(a) {
   })
 }
 
+function tanhOp(a) {
+  const outData = gpuTanh(a.data)
+  return variable(outData, {
+    _deps: [a],
+    _backward: _noGrad ? null : (grad) => {
+      addGrad(a, gpuTanhBwd(outData, grad))
+    },
+  })
+}
+
+function sigmoidOp(a) {
+  const outData = gpuSigmoid(a.data)
+  return variable(outData, {
+    _deps: [a],
+    _backward: _noGrad ? null : (grad) => {
+      addGrad(a, gpuSigmoidBwd(outData, grad))
+    },
+  })
+}
+
+function reluSquaredOp(a) {
+  return variable(gpuReluSquared(a.data), {
+    _deps: [a],
+    _backward: _noGrad ? null : (grad) => {
+      addGrad(a, gpuReluSquaredBwd(a.data, grad))
+    },
+  })
+}
+
 function sum(a, axis) {
   const outData = gpuSum(a.data, axis)
   return variable(outData, {
@@ -360,13 +392,16 @@ function layernorm(a, gamma, beta, eps = 1e-5) {
 // Fused attention: Q, K, V → O in O(n) memory using tiled online softmax.
 // Saves log-sum-exp stats (L, M) for the backward pass instead of the full attention matrix.
 
-function flashAttention(q, k, v, causal = true) {
-  const { O, L, M } = gpuFlashFwd(q.data, k.data, v.data, causal)
+function flashAttention(q, k, v, opts = {}) {
+  if (typeof opts === 'boolean') opts = { causal: opts }
+  const { causal = true, numKVHeads = 0, windowSize = 0 } = opts
+  const fwdOpts = { causal, numKVHeads, windowSize }
+  const { O, L, M } = gpuFlashFwd(q.data, k.data, v.data, fwdOpts)
   return variable(O, {
     _deps: [q, k, v],
     _backward: _noGrad ? null : (grad) => {
       const { dQ, dK, dV } = gpuFlashBwd(
-        q.data, k.data, v.data, O, grad, L, M, causal
+        q.data, k.data, v.data, O, grad, L, M, fwdOpts
       )
       addGrad(q, dQ)
       addGrad(k, dK)
@@ -641,6 +676,7 @@ export {
   backward, zeroGrad, noGrad,
   add, sub, mul, div, matmul, scale, neg,
   relu, gelu,
+  tanhOp as tanh, sigmoidOp as sigmoid, reluSquaredOp as reluSquared,
   softmax, layernorm, crossEntropy,
   flashAttention,
   sum, reshape,

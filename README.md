@@ -8,7 +8,7 @@ Smith gives JavaScript direct access to Metal compute shaders through a thin C b
 
 - **GPU tensors** backed by Metal shared buffers, accessed as typed arrays (f32, f16)
 - **Reverse-mode autograd** (DAG-based, topological sort backward)
-- **Fused Metal shaders** for matmul (tiled GEMM), softmax, layernorm, flash attention, AdamW, and more
+- **Fused Metal shaders** for matmul (tiled GEMM), softmax, layernorm, flash attention (GQA + sliding window), AdamW, MuonAdamW, and more
 - **GPT-2 transformer** with multi-head attention, pre-norm blocks, weight tying, and KV cache
 - **Convolutions** — direct conv2d, Winograd F(2x2,3x3), im2col+GEMM, pooling, batch normalization
 - **Vision models** — ResNet-18/34/50/101/152, CLIP ViT-B/32, ViT-B/16, ViT-L/14
@@ -213,7 +213,9 @@ smith/
 │   ├── activation.metal      relu, gelu, silu, sigmoid, tanh
 │   ├── adam.metal             Fused AdamW step
 │   ├── elementwise.metal     add, sub, mul, div + broadcasting
-│   └── reduce.metal          sum, max — full and per-axis
+│   ├── reduce.metal          sum, max — full and per-axis
+│   ├── sampling.metal        argmax, penalties, top-K, multinomial
+│   └── gather_scatter.metal  gather, scatter, atomic scatter-add
 ├── src/
 │   ├── device.js       FFI bindings to libsmith.dylib
 │   ├── tensor.js       GPU-backed tensors + shape utilities
@@ -271,6 +273,10 @@ smith/
 | `elementwise_*` | add, sub, mul, div, scale, neg, fill — with broadcasting |
 | `activation_*` | relu, gelu, silu, sigmoid, tanh — forward and backward |
 | `reduce_sum/max` | Full parallel reduction and per-axis variants |
+| `argmax_reduce` | Two-pass parallel argmax: per-group winners → final reduce |
+| `sampling` | Repetition penalty, temperature scaling, top-K threshold+mask, multinomial sample |
+| `gather_forward` | Indexed read along any axis via `[outer, dimSize, inner]` decomposition |
+| `scatter_add/forward` | Indexed write: atomic accumulation (scatter_add) or last-write-wins (scatter_forward) |
 
 ## Key design decisions
 
