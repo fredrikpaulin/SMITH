@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.22.0 — Tensor Lifecycle Management (2026-03-26)
+
+### Added
+
+- **`src/lifecycle.js`** — Tensor lifecycle management module. `dispose(t)` releases a tensor's buffer to the pool immediately. `retain(t)` increments a ref count so the tensor survives scope cleanup. `isDisposed(t)` checks status. `using(fn)` / `usingAsync(fn)` run a function and dispose all tensors allocated inside when it returns (retained tensors survive). `withNoAlloc(fn)` throws if any tensor is allocated inside — useful for verifying buffer reuse. `activeScopeDepth()` reports nesting level.
+- **Lifecycle fields on tensors** — `tensor.create()` now calls `trackAllocation()` which sets `_refCount` and `_disposed` on every tensor. No-op when no scope is active; zero overhead for existing code.
+- **`poolStats().totalAllocated`** — Cumulative bytes allocated (not recycled) since last `poolDrain()`. Helps detect memory leaks in inference loops.
+- **Tests** — 25 lifecycle tests: dispose nulls buffer/data, double-dispose safety, retain/dispose ref counting, scoped cleanup, nested scopes, exception safety, async scopes, withNoAlloc guard, poolStats integration, all tensor factory types.
+
+### Changed
+
+- **`src/tensor.js`** — `create()` now calls `trackAllocation()` from lifecycle.js. Import of lifecycle uses a pluggable release callback (`setReleaseFn`) to avoid circular dependency with device.js.
+- **`src/pool.js`** — `poolStats()` now includes `totalAllocated` field. `poolDrain()` resets the counter.
+
 ## 0.21.0 — Model Registry and Fetcher (2026-03-26)
 
 ### Added

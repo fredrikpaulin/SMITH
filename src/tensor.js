@@ -6,6 +6,10 @@
 import * as device from './device.js'
 import { dtypeBytes, dtypeArray, toFloat16, fromFloat16 } from './dtype.js'
 import { poolAlloc, poolFree } from './pool.js'
+import { trackAllocation, setReleaseFn } from './lifecycle.js'
+
+// Wire lifecycle dispose into pool — called when dispose() frees a tensor
+setReleaseFn((t) => poolFree(t.buffer, t.size * dtypeBytes(t.dtype)))
 
 // --- Shape utilities (ported from TinyFormer) ---
 
@@ -55,7 +59,7 @@ function create(shape, dtype = 'f32', mode = device.SHARED) {
   const data = mode === device.SHARED
     ? device.viewBuffer(buffer, bytes, dtypeArray(dtype))
     : null // private buffers can't be read from CPU
-  return {
+  const t = {
     buffer,
     data,
     shape: shape.slice(),
@@ -64,6 +68,8 @@ function create(shape, dtype = 'f32', mode = device.SHARED) {
     size,
     offset: 0,
   }
+  trackAllocation(t)
+  return t
 }
 
 // Create tensor from JS array data

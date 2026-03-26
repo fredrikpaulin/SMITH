@@ -19,6 +19,7 @@ const privatePool = new Map()
 
 let hits = 0
 let misses = 0
+let totalAllocated = 0  // total bytes allocated (not recycled)
 const MAX_PER_BIN = 16 // cap per-bin to prevent memory bloat
 
 function poolAlloc(bytes, mode = device.SHARED) {
@@ -32,6 +33,7 @@ function poolAlloc(bytes, mode = device.SHARED) {
   }
 
   misses++
+  totalAllocated += bucket
   return device.alloc(bucket, mode)
 }
 
@@ -66,6 +68,7 @@ function poolStats() {
     hits,
     misses,
     hitRate: hits / (hits + misses || 1),
+    totalAllocated,
     shared: { count: sharedCount, bytes: sharedBytes },
     private: { count: privateCount, bytes: privateBytes },
   }
@@ -82,6 +85,7 @@ function poolDrain() {
   privatePool.clear()
   hits = 0
   misses = 0
+  totalAllocated = 0
 }
 
 export {

@@ -16,6 +16,7 @@ Smith gives JavaScript direct access to Metal compute shaders through a thin C b
 - **Model loading** — GGUF (llama.cpp format: Llama, Phi, GPT-2) and safetensors (torchvision, OpenAI CLIP)
 - **Quantization** — Q4 and Q8 matmul for inference, 4-bit weight quantization
 - **Mixed precision** — f16 mode with loss scaling
+- **Tensor lifecycle** — `dispose()`, `retain()`, scoped cleanup via `using()`, allocation guards
 - **Profiling** — per-kernel GPU timing, memory tracking, benchmarking
 - **BPE tokenizer**, checkpoint save/load, text generation with temperature/top-k/top-p/repetition penalty
 

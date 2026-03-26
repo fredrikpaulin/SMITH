@@ -55,6 +55,11 @@ import {
   fetchModel, fetchUrl, registerModel, removeModel,
   modelsDir, reloadRegistry, hashFile,
 } from './models.js'
+import {
+  dispose, retain, isDisposed,
+  using, usingAsync, withNoAlloc,
+  activeScopeDepth,
+} from './lifecycle.js'
 
 // Re-export tensor creation
 const { tensor, zeros, ones, full, rand, randn, scalar, toArray, toString: tensorToString } = T
@@ -168,6 +173,11 @@ const smith = {
   // Memory
   poolStats, poolDrain,
 
+  // Lifecycle
+  dispose, retain, isDisposed,
+  using, usingAsync, withNoAlloc,
+  activeScopeDepth,
+
   // Dtype utilities
   dtypeBytes, toFloat16, fromFloat16, float32ToFloat16, float16ToFloat32,
 
@@ -237,6 +247,9 @@ export {
   createSchedule, getLr,
   clipGradNorm,
   info, poolStats, poolDrain,
+  dispose, retain, isDisposed,
+  using, usingAsync, withNoAlloc,
+  activeScopeDepth,
   f16Mode, defaultDtype, cast, createLossScaler,
   loadGGUF, parseGGUF, listGGUFTensors, extractGGUFConfig,
   createGGUFCache, resetGGUFCache, generateGGUF,

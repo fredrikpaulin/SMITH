@@ -507,6 +507,53 @@ smith.registerModel('my-custom-model', {
 | `removeModel` | `(id)` | Delete cached model files from disk |
 | `modelsDir` | `()` | Path to the models directory |
 | `reloadRegistry` | `()` | Force re-read of registry.json |
+
+## Tensor Lifecycle
+
+Control when tensor buffers are released. By default tensors are reclaimed by `poolDrain()` or GC. The lifecycle API gives explicit control.
+
+```js
+import smith from './src/index.js'
+
+// Scoped cleanup — all tensors allocated inside are freed on exit
+const result = smith.using(() => {
+  const a = smith.zeros([1024, 1024])
+  const b = smith.matmul(smith.variable(a), smith.variable(a))
+  // return value is the only thing that survives
+  const out = smith.zeros([4])
+  smith.retain(out) // keep this one alive
+  return out
+})
+// result is still valid, everything else is freed
+
+// Manual dispose
+const t = smith.zeros([256])
+smith.dispose(t) // buffer returned to pool immediately
+
+// Async scoped cleanup
+await smith.usingAsync(async () => {
+  const mel = await computeMel(audio)
+  // mel is freed when the async scope exits
+})
+
+// Debug: catch unexpected allocations
+smith.withNoAlloc(() => {
+  // throws if any tensor is allocated here
+  // useful for verifying a forward pass reuses cached buffers
+})
+```
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `dispose` | `(tensor)` | Release tensor buffer to pool. Tensor becomes unusable. |
+| `retain` | `(tensor)` | Increment ref count. Tensor survives scope exit. Returns the tensor. |
+| `isDisposed` | `(tensor)` | Check if a tensor has been disposed. |
+| `using` | `(fn)` | Run `fn`, dispose all tensors allocated inside when it returns. Retained tensors survive. |
+| `usingAsync` | `(fn)` | Async version of `using`. |
+| `withNoAlloc` | `(fn)` | Throws if any tensor is allocated inside `fn`. |
+| `activeScopeDepth` | `()` | Number of nested `using` scopes currently active. |
+| `poolStats` | `()` | Pool metrics: hits, misses, hitRate, totalAllocated, shared/private counts. |
+| `poolDrain` | `()` | Release all pooled buffers and reset counters. |
 | `hashFile` | `(path)` | SHA-256 hash a file (streaming) |
 
 fetchModel options: `{ onProgress, force, revision }`. fetchUrl options: `{ id, filename, sha256, onProgress, force }`.

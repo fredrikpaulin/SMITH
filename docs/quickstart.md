@@ -125,6 +125,30 @@ You can also fetch from direct URLs without a registry entry:
 await smith.fetchUrl('https://example.com/weights.bin', { id: 'my-model' })
 ```
 
+## Memory Management
+
+Use `using()` to scope tensor lifetimes. All tensors allocated inside are freed when the scope exits, unless explicitly retained.
+
+```js
+import smith from './src/index.js'
+
+// Intermediates freed automatically
+smith.using(() => {
+  const x = smith.rand([512, 512])
+  const y = smith.rand([512, 512])
+  // x and y are freed here
+})
+
+// Keep specific tensors alive
+const weights = smith.using(() => {
+  const w = smith.rand([256, 256])
+  smith.retain(w)
+  return w
+})
+// weights is still valid
+smith.dispose(weights) // free manually when done
+```
+
 ## Benchmarks
 
 ```sh
