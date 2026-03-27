@@ -45,6 +45,12 @@ uint64_t smith_buffer_length(void* buffer);
 // Release a buffer (decrements retain count).
 void smith_release_buffer(void* buffer);
 
+// Self-test: alloc+release via public API. Returns bytes freed (>0 if OK).
+int64_t smith_test_release(void* ptr);
+
+// Self-test: alloc, use in Metal command, release. Returns bytes freed.
+int64_t smith_test_release_after_use(void* ptr);
+
 // --- Shader Library ---
 
 // Load a precompiled .metallib from disk. Returns library pointer.
@@ -116,5 +122,8 @@ SmithTiming* smith_end_timed(SmithEncoder* enc);
 
 // Get current GPU memory allocation (allocated bytes on device).
 uint64_t smith_allocated_size(void* ctx);
+
+// Get a buffer's retain count (for diagnostics).
+int64_t smith_buffer_retain_count(void* buffer);
 
 #endif // SMITH_GPU_BRIDGE_H

@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.29.3 — Metal Buffer Pool Fix (2026-03-27)
+
+### Fixed
+
+- **OOM kill persisted after 0.29.2** — The `using()` scope fix returned tensors to the pool, but Metal buffers used in compute dispatches accumulate driver-level retains that are never released through Objective-C reference counting. `poolDrain()` called `CFRelease` on these buffers but the retain count never reached zero, so the Metal allocations persisted. Meanwhile the JS-side pool references were cleared, forcing fresh allocations next step. Net effect: ~928MB/step of leaked GPU memory, OOM around step 120–180.
+
+### Changed
+
+- **Removed `poolDrain`** — Since Metal buffers used in dispatches cannot be freed, draining the pool only leaks memory. Buffers now stay pooled across steps and are reused. GPU memory stabilizes after step 2 (~450MB for 1-layer model).
+- **Removed `MAX_PER_BIN` cap** — The per-bucket cap of 16 caused pool overflow, sending buffers to `releaseBuffer` (which couldn't free them). Pool bins are now uncapped so every buffer stays available for reuse.
+- **Per-sequence scoping in `train.js`** — Each of the 8 gradient accumulation sequences now runs in its own `using()` scope with gradient retention, reducing peak memory from 8× to 1× intermediate set.
+- **Proper `@autoreleasepool` + `CFRetain`/`CFRelease` in `gpu_bridge.m`** — `smith_begin` wraps command buffer creation in `@autoreleasepool` with explicit `CFRetain` to manage lifecycle in C structs (ARC doesn't manage `id` fields in C structs). `smith_end_sync`/`smith_end_async`/`smith_end_timed`/`smith_wait` all use `@autoreleasepool` with explicit `nil` to ensure command buffers are deallocated inside the pool.
+- **DAG reference cycle cleanup in `backward()`** — Non-parameter nodes have `_backward`, `_deps`, and `grad` nulled after the backward pass so JS GC can reclaim the computation graph.
+
+### Added
+
+- **`smith_test_release` / `smith_test_release_after_use`** — Self-tests in `gpu_bridge.m` that verify Metal buffer alloc/release works. Run at startup via FFI.
+- **`smith_buffer_retain_count`** — Diagnostic function exposing `CFGetRetainCount` for Metal buffers.
+- **`gpuAllocatedBytes`** — Exposes `device.currentAllocatedSize` for GPU memory tracking.
+
+## 0.29.2 — Training Memory Leak Fix (2026-03-27)
+
+### Fixed
+
+- **OOM kill during long training runs** — `train.js` never freed intermediate tensors (activations, gradients, Newton-Schulz temporaries) between steps. Memory grew linearly with step count, crashing around step 36 with `--time-budget 600`. Wrapped training step body in `smith.using()` scope so all intermediates are returned to the buffer pool after each step. Model params and optimizer state survive because they were allocated before the scope. Same fix applied to the eval loop (one `using()` per eval step).
+
 ## 0.29.1 — Tiled Matmul Threadgroup Memory Fix (2026-03-26)
 
 ### Fixed

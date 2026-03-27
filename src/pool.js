@@ -1,7 +1,6 @@
 // smith/src/pool.js
 // GPU buffer memory pool. Recycles Metal buffers to avoid allocation overhead.
 // Buffers are bucketed by size (rounded up to next power of 2) and storage mode.
-// Pattern inspired by TinyFormer's optimized.js pool, adapted for GPU buffers.
 
 import * as device from './device.js'
 
@@ -20,7 +19,9 @@ const privatePool = new Map()
 let hits = 0
 let misses = 0
 let totalAllocated = 0  // total bytes allocated (not recycled)
-const MAX_PER_BIN = 16 // cap per-bin to prevent memory bloat
+// No cap — Metal buffers used in dispatches can't be freed (command buffer
+// retains persist at the driver level). Every buffer must stay pooled for reuse.
+const MAX_PER_BIN = Infinity
 
 function poolAlloc(bytes, mode = device.SHARED) {
   const bucket = bucketSize(bytes)
@@ -44,13 +45,7 @@ function poolFree(buffer, bytes, mode = device.SHARED) {
 
   if (!pool.has(bucket)) pool.set(bucket, [])
   const bin = pool.get(bucket)
-
-  if (bin.length < MAX_PER_BIN) {
-    bin.push({ buffer, bytes: bucket })
-  } else {
-    // Pool is full for this size — actually release
-    device.releaseBuffer(buffer)
-  }
+  bin.push({ buffer, bytes: bucket })
 }
 
 function poolStats() {
@@ -74,23 +69,8 @@ function poolStats() {
   }
 }
 
-function poolDrain() {
-  for (const bin of sharedPool.values()) {
-    for (const entry of bin) device.releaseBuffer(entry.buffer)
-  }
-  for (const bin of privatePool.values()) {
-    for (const entry of bin) device.releaseBuffer(entry.buffer)
-  }
-  sharedPool.clear()
-  privatePool.clear()
-  hits = 0
-  misses = 0
-  totalAllocated = 0
-}
-
 export {
   poolAlloc,
   poolFree,
   poolStats,
-  poolDrain,
 }

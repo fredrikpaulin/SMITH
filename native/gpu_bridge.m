@@ -37,6 +37,10 @@ void* smith_init(void) {
 void smith_destroy(void* ptr) {
   if (!ptr) return;
   SmithContext* ctx = (SmithContext*)ptr;
+  // MTLCreateSystemDefaultDevice returns +1, newCommandQueue returns +1.
+  // C struct fields are __unsafe_unretained so we must release manually.
+  if (ctx->queue) CFRelease((__bridge CFTypeRef)ctx->queue);
+  if (ctx->device) CFRelease((__bridge CFTypeRef)ctx->device);
   ctx->queue = nil;
   ctx->device = nil;
   free(ctx);
@@ -88,11 +92,54 @@ uint64_t smith_buffer_length(void* buffer) {
   return [buf length];
 }
 
+int64_t smith_buffer_retain_count(void* buffer) {
+  if (!buffer) return -1;
+  return (int64_t)CFGetRetainCount(buffer);
+}
+
 void smith_release_buffer(void* buffer) {
   if (!buffer) return;
-  // Transfer ownership back to ARC, which will release it.
-  id<MTLBuffer> buf = (__bridge_transfer id<MTLBuffer>)buffer;
-  buf = nil;
+  CFRelease(buffer);
+}
+
+// Self-test: uses same smith_alloc/smith_release_buffer code path.
+// Returns bytes freed (should be >= 1MB if release works).
+int64_t smith_test_release(void* ptr) {
+  @autoreleasepool {
+    SmithContext* ctx = (SmithContext*)ptr;
+    uint64_t before = ctx->device.currentAllocatedSize;
+    void* raw = smith_alloc(ptr, 1048576, 0);
+    uint64_t after_alloc = ctx->device.currentAllocatedSize;
+    smith_release_buffer(raw);
+    uint64_t after_release = ctx->device.currentAllocatedSize;
+    return (int64_t)(after_alloc - after_release);
+  }
+}
+
+// Self-test 2: alloc a buffer, USE it in a Metal command, then release.
+// Returns bytes freed. If 0, Metal commands add retains that prevent release.
+int64_t smith_test_release_after_use(void* ptr) {
+  SmithContext* ctx = (SmithContext*)ptr;
+  void* raw = smith_alloc(ptr, 1048576, 0);
+  uint64_t after_alloc = ctx->device.currentAllocatedSize;
+
+  // Use the buffer in a trivial Metal command inside @autoreleasepool.
+  // The pool drains the autoreleased cmdBuf/enc, and ARC releases the local
+  // variables when they go out of scope — so the command buffer is fully
+  // deallocated BEFORE we measure currentAllocatedSize.
+  @autoreleasepool {
+    id<MTLCommandBuffer> cmdBuf = [ctx->queue commandBuffer];
+    id<MTLComputeCommandEncoder> enc = [cmdBuf computeCommandEncoder];
+    id<MTLBuffer> buf = (__bridge id<MTLBuffer>)raw;
+    [enc setBuffer:buf offset:0 atIndex:0];
+    [enc endEncoding];
+    [cmdBuf commit];
+    [cmdBuf waitUntilCompleted];
+  } // cmdBuf deallocated here → releases its retain on our buffer
+
+  smith_release_buffer(raw);
+  uint64_t after_release = ctx->device.currentAllocatedSize;
+  return (int64_t)(after_alloc - after_release);
 }
 
 // --- Shader Library ---
@@ -159,8 +206,16 @@ SmithEncoder* smith_begin(void* ptr) {
   SmithContext* ctx = (SmithContext*)ptr;
   SmithEncoder* enc = calloc(1, sizeof(SmithEncoder));
   enc->ctx = ctx;
-  enc->commandBuffer = [ctx->queue commandBuffer];
-  enc->encoder = [enc->commandBuffer computeCommandEncoder];
+  // [commandBuffer] and [computeCommandEncoder] return autoreleased objects.
+  // ARC does NOT manage id fields in C structs, so we must retain manually.
+  // The @autoreleasepool drains the autorelease +1 immediately; CFRetain keeps
+  // the objects alive past the pool. CFRelease in smith_end_* brings count to 0.
+  @autoreleasepool {
+    enc->commandBuffer = [ctx->queue commandBuffer];
+    CFRetain((__bridge CFTypeRef)enc->commandBuffer);
+    enc->encoder = [enc->commandBuffer computeCommandEncoder];
+    CFRetain((__bridge CFTypeRef)enc->encoder);
+  }
   return enc;
 }
 
@@ -191,29 +246,53 @@ void smith_dispatch(SmithEncoder* enc,
 }
 
 void smith_end_sync(SmithEncoder* enc) {
-  [enc->encoder endEncoding];
-  [enc->commandBuffer commit];
-  [enc->commandBuffer waitUntilCompleted];
-  enc->encoder = nil;
-  enc->commandBuffer = nil;
+  @autoreleasepool {
+    id<MTLComputeCommandEncoder> encoder = enc->encoder;
+    id<MTLCommandBuffer> cmdBuf = enc->commandBuffer;
+    CFRelease((__bridge CFTypeRef)encoder);
+    CFRelease((__bridge CFTypeRef)cmdBuf);
+    enc->encoder = nil;
+    enc->commandBuffer = nil;
+    [encoder endEncoding];
+    [cmdBuf commit];
+    [cmdBuf waitUntilCompleted];
+    // Explicitly nil locals INSIDE the pool so dealloc happens before
+    // objc_autoreleasePoolPop(). The command buffer's dealloc autoreleases
+    // its Metal buffer retains — those must land in THIS pool, not the outer
+    // (never-draining) Bun FFI pool.
+    encoder = nil;
+    cmdBuf = nil;
+  }
   free(enc);
 }
 
 void* smith_end_async(SmithEncoder* enc) {
-  [enc->encoder endEncoding];
-  [enc->commandBuffer commit];
-  // Return the command buffer as a token (retained so it survives)
-  void* token = (__bridge_retained void*)enc->commandBuffer;
-  enc->encoder = nil;
-  enc->commandBuffer = nil;
+  void* token;
+  @autoreleasepool {
+    id<MTLComputeCommandEncoder> encoder = enc->encoder;
+    id<MTLCommandBuffer> cmdBuf = enc->commandBuffer;
+    CFRelease((__bridge CFTypeRef)encoder);
+    CFRelease((__bridge CFTypeRef)cmdBuf);
+    enc->encoder = nil;
+    enc->commandBuffer = nil;
+    [encoder endEncoding];
+    [cmdBuf commit];
+    // __bridge_retained adds +1 for the raw pointer we return as token.
+    token = (__bridge_retained void*)cmdBuf;
+    encoder = nil;
+    cmdBuf = nil;  // ARC release balances the __bridge_retained, leaving net +1 for caller
+  }
   free(enc);
   return token;
 }
 
 void smith_wait(void* token) {
   if (!token) return;
-  id<MTLCommandBuffer> cb = (__bridge_transfer id<MTLCommandBuffer>)token;
-  [cb waitUntilCompleted];
+  @autoreleasepool {
+    id<MTLCommandBuffer> cb = (__bridge_transfer id<MTLCommandBuffer>)token;
+    [cb waitUntilCompleted];
+    cb = nil;  // dealloc inside pool so autoreleased buffer retains get drained
+  }
 }
 
 // --- Convenience: single-shot dispatch ---
@@ -221,17 +300,23 @@ void smith_wait(void* token) {
 // --- Profiling ---
 
 SmithTiming* smith_end_timed(SmithEncoder* enc) {
-  [enc->encoder endEncoding];
-  [enc->commandBuffer commit];
-  [enc->commandBuffer waitUntilCompleted];
-
   SmithTiming* timing = calloc(1, sizeof(SmithTiming));
-  timing->gpu_start = enc->commandBuffer.GPUStartTime;
-  timing->gpu_end = enc->commandBuffer.GPUEndTime;
-  timing->gpu_ms = (timing->gpu_end - timing->gpu_start) * 1000.0;
-
-  enc->encoder = nil;
-  enc->commandBuffer = nil;
+  @autoreleasepool {
+    id<MTLComputeCommandEncoder> encoder = enc->encoder;
+    id<MTLCommandBuffer> cmdBuf = enc->commandBuffer;
+    CFRelease((__bridge CFTypeRef)encoder);
+    CFRelease((__bridge CFTypeRef)cmdBuf);
+    enc->encoder = nil;
+    enc->commandBuffer = nil;
+    [encoder endEncoding];
+    [cmdBuf commit];
+    [cmdBuf waitUntilCompleted];
+    timing->gpu_start = cmdBuf.GPUStartTime;
+    timing->gpu_end = cmdBuf.GPUEndTime;
+    timing->gpu_ms = (timing->gpu_end - timing->gpu_start) * 1000.0;
+    encoder = nil;
+    cmdBuf = nil;
+  }
   free(enc);
   return timing;
 }
