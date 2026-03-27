@@ -167,6 +167,7 @@ while (true) {
     }
   }
 
+  smith.clipGradNorm(params, 1.0)
   smith.muonAdamWStep(optimizer)
   smith.zeroGrad(params)
 
