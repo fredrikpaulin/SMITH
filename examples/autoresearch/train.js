@@ -35,7 +35,7 @@ const { values: args } = parseArgs({
     vocab: { type: 'string', default: '4096' },
     'batch-size': { type: 'string', default: '32768' },
     'time-budget': { type: 'string', default: '60' },
-    lr: { type: 'string', default: '0.04' },
+    lr: { type: 'string', default: '0.06' },
     data: { type: 'string', default: join(import.meta.dir, 'data') },
   },
 })
