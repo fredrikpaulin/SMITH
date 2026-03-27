@@ -30,7 +30,7 @@ const { values: args } = parseArgs({
   options: {
     depth: { type: 'string', default: '2' },
     dim: { type: 'string', default: '128' },
-    'seq-len': { type: 'string', default: '1024' },
+    'seq-len': { type: 'string', default: '2048' },
     'head-dim': { type: 'string', default: '32' },
     vocab: { type: 'string', default: '4096' },
     'batch-size': { type: 'string', default: '16384' },
