@@ -88,7 +88,7 @@ const config = {
   vocabSize: VOCAB_SIZE,
   nLayer: DEPTH,
   nHead,
-  nKVHead: nHead,  // full MHA (no GQA for small models)
+  nKVHead: 2,  // GQA with 2 KV heads
   nEmbd,
   windowPattern: 'SSSL',
 }
