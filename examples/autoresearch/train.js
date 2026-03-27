@@ -28,14 +28,14 @@ import { load as loadTokenizer } from '../../src/tokenizer.js'
 
 const { values: args } = parseArgs({
   options: {
-    depth: { type: 'string', default: '4' },
-    dim: { type: 'string', default: '256' },
-    'seq-len': { type: 'string', default: '512' },
-    'head-dim': { type: 'string', default: '64' },
+    depth: { type: 'string', default: '1' },
+    dim: { type: 'string', default: '128' },
+    'seq-len': { type: 'string', default: '4096' },
+    'head-dim': { type: 'string', default: '32' },
     vocab: { type: 'string', default: '4096' },
-    'batch-size': { type: 'string', default: '8192' },
+    'batch-size': { type: 'string', default: '32768' },
     'time-budget': { type: 'string', default: '60' },
-    lr: { type: 'string', default: '0.02' },
+    lr: { type: 'string', default: '0.08' },
     data: { type: 'string', default: join(import.meta.dir, 'data') },
   },
 })
@@ -63,7 +63,7 @@ const SCALAR_LR = 0.5
 const WEIGHT_DECAY = 0.2
 const ADAM_BETAS = [0.8, 0.95]
 const WARMUP_RATIO = 0.0
-const WARMDOWN_RATIO = 0.5
+const WARMDOWN_RATIO = 0.0
 
 // --- Data ---
 
@@ -88,7 +88,7 @@ const config = {
   vocabSize: VOCAB_SIZE,
   nLayer: DEPTH,
   nHead,
-  nKVHead: nHead,  // full MHA (no GQA for small models)
+  nKVHead: 2,  // GQA with 2 KV heads
   nEmbd,
   windowPattern: 'SSSL',
 }
@@ -140,20 +140,7 @@ let step = 0
 while (true) {
   const t0 = performance.now()
 
-  // Accumulate gradients over multiple sequences
-  let stepLoss = 0
-  for (let seq = 0; seq < seqsPerStep; seq++) {
-    const { input, target } = trainLoader.next()
-    const { loss } = forward(model, input, target)
-    stepLoss += loss.data.data[0]
-
-    // Scale gradient by 1/seqsPerStep for averaging
-    const scaledLoss = smith.scale(loss, 1.0 / seqsPerStep)
-    smith.backward(scaledLoss)
-  }
-  stepLoss /= seqsPerStep
-
-  // LR schedule
+  // LR schedule (no tensors — pure math)
   const progress = Math.min(totalTime / TIME_BUDGET, 1.0)
   const lrm = getLrMultiplier(progress)
   const muonMom = getMuonMomentum(step)
@@ -167,8 +154,50 @@ while (true) {
     }
   }
 
-  smith.muonAdamWStep(optimizer)
+  let stepLoss = 0
+
+  // Per-sequence scoping: each sequence forward+backward runs in its own
+  // using() scope so peak memory is ~1 sequence, not seqsPerStep sequences.
+  // Accumulated gradients (p.grad) are retained to survive scope exit.
+  for (let seq = 0; seq < seqsPerStep; seq++) {
+    // Snapshot current grads — addGrad will replace them with new accumulated tensors
+    const prevGrads = new Map()
+    for (const p of params) if (p.grad) prevGrads.set(p, p.grad)
+
+    smith.using(() => {
+      const { input, target } = trainLoader.next()
+      const { loss } = forward(model, input, target)
+      stepLoss += loss.data.data[0]
+
+      const scaledLoss = smith.scale(loss, 1.0 / seqsPerStep)
+      smith.backward(scaledLoss)
+
+      // Retain accumulated grads so they survive this scope's cleanup
+      for (const p of params) if (p.grad) smith.retain(p.grad)
+    })
+
+    // Dispose old retained grads that addGrad replaced with new accumulated versions
+    for (const [p, oldG] of prevGrads) {
+      if (p.grad !== oldG) smith.dispose(oldG)
+    }
+  }
+
+  // Optimizer step in its own scope (NS intermediates freed on exit)
+  smith.using(() => {
+    smith.clipGradNorm(params, 1.0)
+    smith.muonAdamWStep(optimizer)
+  })
+
+  // Dispose retained grads and zero out
+  for (const p of params) {
+    if (p.grad) smith.dispose(p.grad)
+  }
   smith.zeroGrad(params)
+
+  // Force GC every step to reclaim Variable DAG objects and closures
+  if (typeof Bun !== 'undefined') Bun.gc(true)
+
+  stepLoss /= seqsPerStep
 
   const dt = (performance.now() - t0) / 1000
 
@@ -189,7 +218,18 @@ while (true) {
   const pct = (100 * progress).toFixed(1)
   const remaining = Math.max(0, TIME_BUDGET - totalTime)
 
-  process.stdout.write(`\rstep ${String(step).padStart(4)} (${pct}%) | loss: ${debiased.toFixed(4)} | lrm: ${lrm.toFixed(2)} | dt: ${(dt * 1000).toFixed(0)}ms | tok/s: ${tokSec.toLocaleString()} | left: ${remaining.toFixed(0)}s   `)
+  // Pool stats (no drain — reuse buffers across steps)
+  const poolInfo = smith.poolStats()
+  const gpuMB = (smith.gpuAllocatedBytes() / 1e6).toFixed(0)
+  const mem = process.memoryUsage()
+  const rssMB = (mem.rss / 1e6).toFixed(0)
+  const heapMB = (mem.heapUsed / 1e6).toFixed(0)
+  process.stdout.write(`\rstep ${String(step).padStart(4)} (${pct}%) | loss: ${debiased.toFixed(4)} | dt: ${(dt * 1000).toFixed(0)}ms | rss: ${rssMB}MB gpu: ${gpuMB}MB heap: ${heapMB}MB | left: ${remaining.toFixed(0)}s   `)
+  if (step % 20 === 0 || step < 3) {
+    const poolCount = poolInfo.shared.count + poolInfo.private.count
+    const poolMB = ((poolInfo.shared.bytes + poolInfo.private.bytes) / 1e6).toFixed(0)
+    console.log(`\n  [mem] gpu=${gpuMB}MB pool=${poolCount}bufs/${poolMB}MB hits=${poolInfo.hits} misses=${poolInfo.misses}`)
+  }
 
   step++
 
@@ -211,27 +251,29 @@ const tokenIds = []
 
 smith.noGrad(() => {
   for (let i = 0; i < evalSteps; i++) {
-    const { input, target } = valLoader.next()
-    const { logits } = forward(model, input)
+    smith.using(() => {
+      const { input, target } = valLoader.next()
+      const { logits } = forward(model, input)
 
-    // Compute per-token loss manually for BPB
-    const logitsData = logits.data.data
-    const V = config.vocabSize
-    for (let t = 0; t < SEQ_LEN; t++) {
-      const offset = t * V
-      let maxLogit = -Infinity
-      for (let v = 0; v < V; v++) {
-        if (logitsData[offset + v] > maxLogit) maxLogit = logitsData[offset + v]
+      // Compute per-token loss manually for BPB
+      const logitsData = logits.data.data
+      const V = config.vocabSize
+      for (let t = 0; t < SEQ_LEN; t++) {
+        const offset = t * V
+        let maxLogit = -Infinity
+        for (let v = 0; v < V; v++) {
+          if (logitsData[offset + v] > maxLogit) maxLogit = logitsData[offset + v]
+        }
+        let sumExp = 0
+        for (let v = 0; v < V; v++) sumExp += Math.exp(logitsData[offset + v] - maxLogit)
+        const logSumExp = Math.log(sumExp)
+        const loss = -(logitsData[offset + target[t]] - maxLogit - logSumExp)
+        tokenLosses.push(loss)
+        tokenIds.push(target[t])
+        valLossSum += loss
+        valTokenCount++
       }
-      let sumExp = 0
-      for (let v = 0; v < V; v++) sumExp += Math.exp(logitsData[offset + v] - maxLogit)
-      const logSumExp = Math.log(sumExp)
-      const loss = -(logitsData[offset + target[t]] - maxLogit - logSumExp)
-      tokenLosses.push(loss)
-      tokenIds.push(target[t])
-      valLossSum += loss
-      valTokenCount++
-    }
+    })
   }
 })
 

@@ -73,7 +73,7 @@ function createModel(config = {}) {
   const { vocabSize, nEmbd, nLayer, nHead, nKVHead, seqLen } = cfg
   const headDim = Math.floor(nEmbd / nHead)
   const kvDim = nKVHead * headDim
-  const ffnDim = 4 * nEmbd
+  const ffnDim = Math.floor(8 * nEmbd / 3)
   const veGateChannels = Math.min(32, nEmbd)
 
   // Embedding
@@ -92,8 +92,9 @@ function createModel(config = {}) {
       cK: param([nEmbd, kvDim]),
       cV: param([nEmbd, kvDim]),
       cProj: param([nHead * headDim, nEmbd]),
-      // MLP
-      cFc: param([nEmbd, ffnDim]),
+      // MLP (SwiGLU)
+      cFcUp: param([nEmbd, ffnDim]),
+      cFcGate: param([nEmbd, ffnDim]),
       cMlpProj: param([ffnDim, nEmbd]),
       // RMSNorm gammas
       normAttn: variable(ones([nEmbd]), { requiresGrad: true }),
@@ -151,7 +152,8 @@ function initWeights(model) {
     // Proj: zeros
     block.cProj.data.data.fill(0)
     // MLP fc: uniform, proj: zeros
-    uniformInit(block.cFc.data.data, s)
+    uniformInit(block.cFcUp.data.data, s)
+    uniformInit(block.cFcGate.data.data, s)
     block.cMlpProj.data.data.fill(0)
     // Norm gammas: ones (already set by T.ones)
     // VE
@@ -184,9 +186,8 @@ function forward(model, tokens, targets = null) {
   const ropeQ = tileRoPETable(ropeBase, T, nHead)
   const ropeK = tileRoPETable(ropeBase, T, nKVHead)
 
-  // Token embedding + RMSNorm
+  // Token embedding
   let x = embedding(tokens, model.wte)
-  x = rmsNorm(x, variable(ones([nEmbd]), { requiresGrad: false }))
   const x0 = x
 
   for (let i = 0; i < blocks.length; i++) {
@@ -246,10 +247,11 @@ function forward(model, tokens, targets = null) {
     const attnProj = matmul(attnOut, block.cProj)
     x = add(x, attnProj)
 
-    // --- MLP ---
+    // --- MLP (SwiGLU) ---
     const xMlpNorm = rmsNorm(x, block.normMlp)
-    let h = matmul(xMlpNorm, block.cFc)
-    h = reluSquared(h)
+    const up = matmul(xMlpNorm, block.cFcUp)
+    const gate = matmul(xMlpNorm, block.cFcGate)
+    const h = smith.swiglu(up, gate)
     const mlpOut = matmul(h, block.cMlpProj)
     x = add(x, mlpOut)
   }
@@ -257,10 +259,8 @@ function forward(model, tokens, targets = null) {
   // Final norm
   x = rmsNorm(x, model.normF)
 
-  // LM head + soft-capping
-  let logits = matmul(x, model.lmHead)  // [T, vocabSize]
-  const softcap = 15
-  logits = scale(tanh(scale(logits, 1.0 / softcap)), softcap)
+  // LM head
+  const logits = matmul(x, model.lmHead)  // [T, vocabSize]
 
   if (targets !== null) {
     const loss = crossEntropy(logits, targets)
@@ -347,7 +347,7 @@ function getParamGroups(model) {
 
   for (const block of blocks) {
     matrixParams.push(block.cQ, block.cK, block.cV, block.cProj)
-    matrixParams.push(block.cFc, block.cMlpProj)
+    matrixParams.push(block.cFcUp, block.cFcGate, block.cMlpProj)
     if (block.veGate) matrixParams.push(block.veGate)
     if (block.veEmbed) veParams.push(block.veEmbed)
   }

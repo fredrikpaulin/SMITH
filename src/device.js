@@ -42,6 +42,11 @@ const { symbols: lib } = dlopen(LIB_PATH, {
   // Profiling
   smith_end_timed:                  { returns: FFIType.ptr, args: [FFIType.ptr] },
   smith_allocated_size:             { returns: FFIType.u64, args: [FFIType.ptr] },
+
+  // Diagnostics
+  smith_test_release:               { returns: FFIType.i64, args: [FFIType.ptr] },
+  smith_test_release_after_use:     { returns: FFIType.i64, args: [FFIType.ptr] },
+  smith_buffer_retain_count:        { returns: FFIType.i64, args: [FFIType.ptr] },
 })
 
 // Storage mode constants
@@ -51,6 +56,13 @@ const PRIVATE = 1
 // Initialize Metal device once
 const ctx = lib.smith_init()
 if (!ctx) throw new Error('smith: failed to initialize Metal device. Apple Silicon GPU required.')
+
+// Self-tests
+{
+  const freed1 = Number(lib.smith_test_release(ctx))
+  const freed2 = Number(lib.smith_test_release_after_use(ctx))
+  console.log(`smith: release test: unused=${freed1}, after_metal_use=${freed2} (both should be ~1048576)`)
+}
 
 // Resolve shader library path
 const METALLIB_PATH = resolve(dirname(import.meta.dir), 'shaders', 'smith.metallib')
@@ -113,6 +125,10 @@ function bufferLength(buffer) {
 
 function releaseBuffer(buffer) {
   lib.smith_release_buffer(buffer)
+}
+
+function bufferRetainCount(buffer) {
+  return Number(lib.smith_buffer_retain_count(buffer))
 }
 
 // Create a typed array view into a shared Metal buffer's memory.
@@ -214,6 +230,7 @@ export {
   bufferContents,
   bufferLength,
   releaseBuffer,
+  bufferRetainCount,
   viewBuffer,
 
   // Pipelines

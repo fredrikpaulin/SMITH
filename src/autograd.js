@@ -73,6 +73,17 @@ function backward(v) {
   for (const node of order) {
     if (node._backward) node._backward(node.grad)
   }
+
+  // Break reference cycles in the computation graph so JS GC can reclaim
+  // Variable objects promptly. Without this, _backward closures capture
+  // references to forward tensors, and _deps chains keep the entire DAG alive.
+  for (const node of order) {
+    if (!node.requiresGrad) {
+      node._backward = null
+      node._deps = null
+      node.grad = null
+    }
+  }
 }
 
 // --- Gradient utilities ---
