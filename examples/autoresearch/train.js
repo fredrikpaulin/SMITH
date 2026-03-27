@@ -33,7 +33,7 @@ const { values: args } = parseArgs({
     'seq-len': { type: 'string', default: '4096' },
     'head-dim': { type: 'string', default: '32' },
     vocab: { type: 'string', default: '4096' },
-    'batch-size': { type: 'string', default: '16384' },
+    'batch-size': { type: 'string', default: '32768' },
     'time-budget': { type: 'string', default: '60' },
     lr: { type: 'string', default: '0.04' },
     data: { type: 'string', default: join(import.meta.dir, 'data') },
