@@ -50,6 +50,18 @@ Three-stage pipeline, all running on-device:
 - `decoder.js` — SplitRVQ dequantization, transformer, ConvNeXt upsampling, SnakeBeta vocoder
 - `audio.js` — WAV encoding and macOS `afplay` playback
 
+## Generation pipeline
+
+The talker and predictor run interleaved, not sequentially. At each decode step:
+
+1. **Predictor** receives the current talker hidden state (projected 2048→1024) as position 0, and the group-0 code embedding (also projected) as position 1. It autoregressively generates groups 1-15 at positions 2-16.
+2. All 16 group embeddings are summed: group-0 from the talker's codec embedding, groups 1-15 from the predictor's codec embeddings. The `tts_pad_embed` vector is added to the sum.
+3. **Talker** decodes one step using this summed embedding as input, producing the next group-0 code and a new hidden state.
+
+This feedback loop is critical — without it, the talker generates codes with no acoustic context.
+
+The decoder converts 16-group codes to audio through: RVQ dequantization → pre-conv → 8-layer transformer → 2× ConvNeXt upsampling → 4 vocoder blocks (8×5×4×3 upsampling) with SnakeBeta activations and dilated residual convolutions → final 1-channel output at 24kHz.
+
 ## New Smith ops
 
 This example required two new ops added to Smith core:

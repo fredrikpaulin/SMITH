@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.30.1 — TTS Decoder Bug Fixes (2026-03-28)
+
+### Fixed
+
+- **Interleaved talker+predictor generation** — The decode loop ran the talker to completion then the predictor once. Now runs predictor at each talker step with all 16 group embeddings summed back as input. This is required for the talker to receive acoustic feedback.
+- **Predictor 2-position prefix** — Code predictor now receives projected talker hidden (position 0) + projected group-0 embedding (position 1) before generating groups 1-15. Previously only saw the hidden state.
+- **Causal conv1d right-side trimming** — `conv1dForward` uses symmetric padding. Causal behavior requires trimming `effectiveKernel - 1` samples from the right to prevent future leakage. Was producing wind/static noise.
+- **Depthwise conv1d kernel direction** — Manual depthwise implementation used `input[t - k*d]` (convolution order). Fixed to `input[t - (K-1-k)*d]` to match PyTorch's cross-correlation convention where `weight[0]` sees the oldest sample.
+- **Dilated convolution support** — `conv1dForward` has no dilation parameter, so residual unit dilations [3, 9] were silently ignored. Added CPU im2col with dilation + GPU GEMM path for dilation > 1.
+- **Smith tensor compatibility** — Hidden states stored as plain objects caused crashes in GPU matmul. Added `copyHidden()` to create proper `smith.zeros()` tensors.
+
 ## 0.30.0 — Qwen3-TTS Text-to-Speech Example (2026-03-27)
 
 ### Added
