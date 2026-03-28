@@ -137,6 +137,20 @@
           "name": "NVIDIA-Nemotron3-Nano-4B-Q4_K_M.gguf"
         }
       ]
+    },
+    "qwen3-tts": {
+      "repo": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
+      "format": "safetensors",
+      "description": "Qwen3-TTS 12Hz 1.7B Base — three-stage TTS (talker + code predictor + speech decoder), 4.5 GB",
+      "loader": "safetensors",
+      "files": [
+        { "name": "config.json" },
+        { "name": "vocab.json" },
+        { "name": "merges.txt" },
+        { "name": "model.safetensors" },
+        { "name": "speech_tokenizer/config.json" },
+        { "name": "speech_tokenizer/model.safetensors" }
+      ]
     }
   }
 }

@@ -226,3 +226,43 @@ kernel void relusquared_backward_f16(device const half* input [[buffer(0)]], dev
 kernel void exp_forward_f16(device const half* input [[buffer(0)]], device half* output [[buffer(1)]], uint tid [[thread_position_in_grid]]) { output[tid] = half(exp(float(input[tid]))); }
 kernel void log_forward_f16(device const half* input [[buffer(0)]], device half* output [[buffer(1)]], uint tid [[thread_position_in_grid]]) { output[tid] = half(log(float(input[tid]))); }
 kernel void sqrt_forward_f16(device const half* input [[buffer(0)]], device half* output [[buffer(1)]], uint tid [[thread_position_in_grid]]) { output[tid] = half(sqrt(float(input[tid]))); }
+
+// --- Snake activation: x + sin²(αx) / α ---
+// α (alpha) is a per-channel learnable parameter.
+// input: [channels, length], alpha: [channels]
+// Each thread handles one element.
+
+struct SnakeParams {
+  uint channels;
+  uint length;
+};
+
+kernel void snake_forward(
+    device const float* input  [[buffer(0)]],
+    device const float* alpha  [[buffer(1)]],
+    device float* output       [[buffer(2)]],
+    constant SnakeParams &p    [[buffer(3)]],
+    uint tid                   [[thread_position_in_grid]])
+{
+    if (tid >= p.channels * p.length) return;
+    uint c = tid / p.length;
+    float x = input[tid];
+    float a = alpha[c];
+    float s = sin(a * x);
+    output[tid] = x + (s * s) / a;
+}
+
+kernel void snake_forward_f16(
+    device const half* input   [[buffer(0)]],
+    device const half* alpha   [[buffer(1)]],
+    device half* output        [[buffer(2)]],
+    constant SnakeParams &p    [[buffer(3)]],
+    uint tid                   [[thread_position_in_grid]])
+{
+    if (tid >= p.channels * p.length) return;
+    uint c = tid / p.length;
+    float x = float(input[tid]);
+    float a = float(alpha[c]);
+    float s = sin(a * x);
+    output[tid] = half(x + (s * s) / a);
+}

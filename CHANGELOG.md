@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.30.0 — Qwen3-TTS Text-to-Speech Example (2026-03-27)
+
+### Added
+
+- **`examples/tts/`** — Full Qwen3-TTS-12Hz-1.7B-Base implementation. Three-stage pipeline: Talker (28-layer transformer, text → group-0 codes), Code Predictor (5-layer transformer, group-0 → groups 1-15), Speech Decoder (dequantize → transformer → vocoder → 24kHz PCM). Zero dependencies — runs entirely on Smith's Metal compute pipeline.
+- **`src/ops/conv1d_transpose.js`** + **`shaders/conv1d_transpose.metal`** — Transposed 1D convolution for fractionally-strided upsampling in vocoders.
+- **`src/ops/snake.js`** + **`shaders/activation.metal` (snake_forward)** — Snake activation function (`x + sin²(αx)/α`) for audio neural networks.
+- **BPE tokenizer** (`examples/tts/tokenizer.js`) — GPT-2-style byte-level BPE, compatible with Qwen tokenizer format.
+- **Safetensors BF16 loader** (`examples/tts/model.js`) — Loads 3.86GB main model + 682MB speech tokenizer, maps Python weight names to JS model structs, handles BF16→F32 conversion.
+- **QK normalization** — Per-head RMSNorm on Q/K projections before RoPE, as used in Qwen3 attention.
+- **WAV encoder + macOS playback** (`examples/tts/audio.js`) — 16-bit PCM WAV encoding, `afplay` integration.
+
 ## 0.29.3 — Metal Buffer Pool Fix (2026-03-27)
 
 ### Fixed
