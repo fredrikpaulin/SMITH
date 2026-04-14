@@ -9,13 +9,17 @@ import { test, expect, describe, beforeAll } from 'bun:test'
 import { existsSync } from 'fs'
 
 const REF_DIR = 'examples/pixel-art/reference-data'
+const CLIP_PATH = 'examples/pixel-art/clip.js'
+// Reference data requires both the .bin/.shape files AND the example code
 const HAS_REF = existsSync(REF_DIR)
+  && existsSync(`${REF_DIR}/scheduler_timesteps.shape`)
+  && existsSync(CLIP_PATH)
 
 // Load a reference tensor from .bin + .shape files
 async function loadRef(name) {
   const binPath = `${REF_DIR}/${name}.bin`
   const shapePath = `${REF_DIR}/${name}.shape`
-  if (!existsSync(binPath)) return null
+  if (!existsSync(binPath) || !existsSync(shapePath)) return null
   const bin = await Bun.file(binPath).arrayBuffer()
   const shapeStr = await Bun.file(shapePath).text()
   const shape = shapeStr.trim().split(',').map(Number)
