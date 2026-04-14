@@ -63,7 +63,7 @@ const CLIP_CONFIGS = {
 
 // --- ViT (Vision Transformer) builder ---
 
-function createVisionTransformer(cfg) {
+function createVisionTransformer(cfg, embedDim) {
   const { dim, layers, heads, patchSize, imageSize } = cfg
   const numPatches = (imageSize / patchSize) ** 2
 
@@ -106,7 +106,7 @@ function createVisionTransformer(cfg) {
   }
 
   // Visual projection
-  const projection = A.variable(T.randn([dim, CLIP_CONFIGS['ViT-B/32'].embedDim]), { requiresGrad: true })
+  const projection = A.variable(T.randn([dim, embedDim]), { requiresGrad: true })
 
   return {
     patchConvWeight, patchConvBias,
@@ -155,7 +155,7 @@ function createCLIP(variant = 'ViT-B/32') {
   const cfg = CLIP_CONFIGS[variant]
   if (!cfg) throw new Error(`Unknown CLIP variant: ${variant}. Use: ${Object.keys(CLIP_CONFIGS).join(', ')}`)
 
-  const visual = createVisionTransformer(cfg.vision)
+  const visual = createVisionTransformer(cfg.vision, cfg.embedDim)
   // Fix projection dims
   visual.projection = A.variable(T.randn([cfg.vision.dim, cfg.embedDim]), { requiresGrad: true })
 

@@ -69,8 +69,25 @@ function poolStats() {
   }
 }
 
+function poolFlush() {
+  const stats = poolStats()
+  sharedPool.clear()
+  privatePool.clear()
+  return stats
+}
+
+function poolDrain() {
+  const result = poolFlush()
+  hits = 0
+  misses = 0
+  totalAllocated = 0
+  return result
+}
+
 export {
   poolAlloc,
   poolFree,
   poolStats,
+  poolFlush,
+  poolDrain,
 }

@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.31.1 — Muon/Matmul Tensor Leak Fixes, Test Timeout Hardening (2026-04-13)
+
+### Fixed
+
+- **muon.js: newtonSchulz() leaked 20+ tensors per step** — Each of the 5 Newton-Schulz iterations created A, AA, B, product tensors without releasing them. Also leaked the initial normalized copy X after copying the result back into g. With real model sizes (e.g., 1024×1024 weight matrices), this leaks ~80MB/step of GPU buffers that the pool can never recycle.
+- **muon.js: stepMuon() leaked gradient copy** — The working gradient copy `g = T.create(...)` was never released after the parameter update. One leaked tensor per Muon parameter per optimizer step.
+- **matmul.js: contiguous copies leaked in matmul2d/matmulBatched** — When inputs have non-standard strides (e.g., transposed views), `T.contiguous()` allocates a new tensor for the dispatch. These copies were never released after the GPU operation completed. Particularly impactful in Newton-Schulz where every `matmul2d(transpose(X), X)` created a hidden contiguous copy of the transposed view.
+- **sdxl-reference.test.js: CLIP tests timed out at default 5s** — CLIP encoder tests load the full SDXL model and run forward passes. Added 60s timeouts to each CLIP test and the `beforeAll` that imports model/clip/tokenizer modules.
+- **gguf_model.test.js: beforeAll timed out under parallel pressure** — Loading a 4GB GGUF file in 30s is tight when `bun test tests/` runs all files concurrently (IO contention from SDXL, Metal shader compilation, muon GPU allocations). Bumped to 120s.
+
+## 0.31.0 — Codebase Sweep: Memory, Correctness, Bun Compliance (2026-04-13)
+
+### Fixed
+
+- **autograd.js: gradient accumulation memory leak** — `addGrad()` replaced `v.grad` with `gpuAdd(v.grad, grad)` without releasing the old tensor. Over repeated backward passes, unreferenced intermediate gradients accumulated. Now disposes old grad before reassignment.
+- **autograd.js: crossEntropy in-place mutation** — `crossEntropy()` backward modified the softmax output tensor in-place (`probs.data[i] -= 1`), corrupting results if the same logits were used twice (e.g., gradient checking, loss logging). Now copies probs before mutation.
+- **pool.js/tensor.js: buffer mode tracking** — `poolFree()` defaulted to `SHARED` mode, but the tensor struct never stored which mode it was allocated with. When lifecycle's `dispose()` frees a tensor, it couldn't pass the right mode. Tensors now store their allocation mode, and both `release()` and lifecycle `dispose()` pass it through.
+- **clip.js: hardcoded ViT-B/32 embedDim** — Visual projection dimension was hardcoded to `CLIP_CONFIGS['ViT-B/32'].embedDim` instead of using the config's `embedDim`. Non-B/32 variants (ViT-B/16, ViT-L/14) would get wrong projection dimensions.
+- **quantize.js: boundary conditions** — When all weights in a Q4 group were identical (range=0), scale was 1 but zero-point was 0, producing incorrect quantized values. Now uses mid-point (8) for uniform groups. Partial groups at tensor boundaries also handled explicitly.
+- **reshape.js: multiple -1 dimensions** — `reshape([−1, −1, 10])` silently computed wrong dimensions. Now validates that at most one dimension is −1.
+- **pool.js: missing poolDrain export** — `poolDrain` was renamed to `poolFlush` in 0.29.3 but never re-exported. Added `poolDrain` as a proper function that resets counters, plus `poolFlush` that clears pools without resetting stats.
+- **sdxl-reference.test.js: unawaited resolveModel()** — `resolveModel('sdxl-base')` is async but wasn't awaited, causing `modelDir` to be a Promise object. Path became `[object Promise]/tokenizer/vocab.json`. Added missing `await`.
+
+### Changed
+
+- **models.js: Bun compliance** — `registerModel()` now uses `Bun.write()` instead of `writeFileSync()` (async). Removed `fs/promises` import; atomic renames use `renameSync`.
+- **tokenizer.js: Bun compliance** — Replaced all `Buffer.from()`/`.toString()` with `TextEncoder`/`TextDecoder` and `btoa`/`atob` for base64. Zero Node.js Buffer dependency.
+- **rmsnorm.js: backward performance** — Replaced `getValue()`/`setValue()` calls in the gradient accumulation loop with direct `.data` array access and bulk `.set()`. Eliminates per-element function call overhead.
+
 ## 0.30.1 — TTS Decoder Bug Fixes (2026-03-28)
 
 ### Fixed

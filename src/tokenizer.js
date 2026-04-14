@@ -1,10 +1,13 @@
 // smith/src/tokenizer.js
 // BPE tokenizer ported directly from TinyFormer. CPU-only, no GPU needed.
 
+const enc = new TextEncoder()
+const dec = new TextDecoder()
+
 // --- Training ---
 
 function train(text, vocabSize = 512, onMerge) {
-  const bytes = new Uint8Array(Buffer.from(text, 'utf-8'))
+  const bytes = enc.encode(text)
   let ids = Array.from(bytes)
 
   const vocab = new Array(256)
@@ -39,7 +42,7 @@ function train(text, vocabSize = 512, onMerge) {
     vocab[newId] = merged
 
     if (onMerge) {
-      const token = Buffer.from(merged).toString('utf-8')
+      const token = dec.decode(merged)
       onMerge(m + 1, numMerges, a, b, token, bestCount)
     }
 
@@ -63,7 +66,7 @@ function train(text, vocabSize = 512, onMerge) {
 // --- Encode ---
 
 function encode(text, merges) {
-  const bytes = new Uint8Array(Buffer.from(text, 'utf-8'))
+  const bytes = enc.encode(text)
   let ids = Array.from(bytes)
 
   for (let m = 0; m < merges.length; m++) {
@@ -101,7 +104,7 @@ function decode(ids, vocab) {
   const buf = new Uint8Array(totalLen)
   let offset = 0
   for (const c of chunks) { buf.set(c, offset); offset += c.length }
-  return Buffer.from(buf).toString('utf-8')
+  return dec.decode(buf)
 }
 
 // --- Save / Load ---
@@ -110,7 +113,7 @@ function save(path, tokenizer) {
   const { vocab, merges, vocabSize } = tokenizer
   const vocabB64 = []
   for (let i = 0; i < vocab.length; i++) {
-    vocabB64.push(vocab[i] ? Buffer.from(vocab[i]).toString('base64') : null)
+    vocabB64.push(vocab[i] ? btoa(String.fromCharCode(...vocab[i])) : null)
   }
   return Bun.write(path, JSON.stringify({ vocabSize, merges, vocab: vocabB64 }))
 }
@@ -118,13 +121,13 @@ function save(path, tokenizer) {
 async function load(path) {
   const text = await Bun.file(path).text()
   const obj = JSON.parse(text)
-  const vocab = obj.vocab.map(b64 => b64 ? new Uint8Array(Buffer.from(b64, 'base64')) : null)
+  const vocab = obj.vocab.map(b64 => b64 ? Uint8Array.from(atob(b64), c => c.charCodeAt(0)) : null)
   return { vocab, merges: obj.merges, vocabSize: obj.vocabSize }
 }
 
 function getTokenStr(id, vocab) {
   if (!vocab[id]) return `<unk:${id}>`
-  try { return Buffer.from(vocab[id]).toString('utf-8') }
+  try { return dec.decode(vocab[id]) }
   catch { return `<bytes:${Array.from(vocab[id]).map(b => b.toString(16)).join('')}>` }
 }
 

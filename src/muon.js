@@ -122,6 +122,12 @@ function newtonSchulz(g, nsSteps) {
 
     // X = a*X + product (in-place on X via GPU kernel)
     nsCombine(X, product, a)
+
+    // Release intermediates — nsCombine wrote result back into X
+    T.release(A)
+    T.release(AA)
+    T.release(B)
+    T.release(product)
   }
 
   // Copy result back into g's buffer so caller sees the orthogonalized gradient
@@ -131,6 +137,9 @@ function newtonSchulz(g, nsSteps) {
     { buffer: g.buffer, index: 1 },
   ], { x: g.size }, null,
   { data: new Float32Array([1.0]), index: 2 })
+
+  // Release the normalized copy — result is now in g's buffer
+  T.release(X)
 }
 
 // --- NorMuon variance reduction ---
@@ -314,6 +323,9 @@ function stepMuon(opt, group) {
     // lr scaled by sqrt(max(1, rows/cols)) as in reference
     const scaledLr = lr * Math.sqrt(Math.max(1.0, rows / cols))
     muonUpdate(p.data, g, scaledLr, weightDecay)
+
+    // Release the gradient copy
+    T.release(g)
   }
 }
 

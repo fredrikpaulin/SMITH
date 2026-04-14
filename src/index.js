@@ -15,7 +15,7 @@ import * as ckpt from './checkpoint.js'
 import { quantizeQ4, matmulQ4, matmulQ8 } from './ops/quantize.js'
 import { loadGGUF, createGGUFCache, resetCache as resetGGUFCache, generateGGUF } from './gguf_loader.js'
 import { parseGGUF, listTensors as listGGUFTensors, extractConfig as extractGGUFConfig } from './gguf.js'
-import { poolStats } from './pool.js'
+import { poolStats, poolFlush, poolDrain } from './pool.js'
 import { gpuFFT, gpuIFFT, gpuBatchFFT } from './ops/fft.js'
 import { gpuArgmax, gpuSample } from './ops/sampling.js'
 import { gather as gpuGatherOp, scatterAdd as gpuScatterAdd, scatter as gpuScatterOp } from './ops/gather.js'
@@ -185,7 +185,8 @@ const smith = {
   info,
 
   // Memory
-  poolStats,   gpuAllocatedBytes: device.allocatedSize,
+  poolStats, poolFlush, poolDrain,
+  gpuAllocatedBytes: device.allocatedSize,
 
   // Lifecycle
   dispose, retain, isDisposed,
@@ -267,7 +268,8 @@ export {
   createMuonAdamW, muonAdamWStep,
   createSchedule, getLr,
   clipGradNorm,
-  info, poolStats,   dispose, retain, isDisposed,
+  info, poolStats, poolFlush, poolDrain,
+  dispose, retain, isDisposed,
   using, usingAsync, withNoAlloc,
   activeScopeDepth,
   f16Mode, defaultDtype, cast, createLossScaler,

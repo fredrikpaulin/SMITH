@@ -50,6 +50,10 @@ function matmul2d(a_, b_) {
     { data: params, index: 3 })
   }
 
+  // Release contiguous copies if they were allocated (different from input)
+  if (a !== a_) T.release(a)
+  if (b !== b_) T.release(b)
+
   return out
 }
 
@@ -72,6 +76,10 @@ function matmulBatched(a_, b_, batchSize) {
   ], { x: N, y: M, z: batchSize },
   { x: Math.min(N, 16), y: Math.min(M, 16), z: 1 },
   { data: params, index: 3 })
+
+  // Release contiguous copies if they were allocated (different from input)
+  if (a !== a_) T.release(a)
+  if (b !== b_) T.release(b)
 
   return out
 }

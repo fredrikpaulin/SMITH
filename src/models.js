@@ -4,8 +4,7 @@
 // verifies SHA-256 checksums, and caches them in models/<id>/.
 
 import { resolve, dirname, join } from 'path'
-import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync, readFileSync, rmdirSync } from 'fs'
-import { rename } from 'fs/promises'
+import { existsSync, mkdirSync, readdirSync, unlinkSync, readFileSync, rmdirSync, renameSync } from 'fs'
 import { createHash } from 'crypto'
 
 const MODELS_DIR = resolve(dirname(import.meta.dir), 'models')
@@ -183,7 +182,7 @@ async function fetchModel(id, opts = {}) {
     }
 
     // Atomic rename
-    await rename(tmpDest, dest)
+    renameSync(tmpDest, dest)
     fetched.push(file.name)
   }
 
@@ -234,7 +233,7 @@ async function fetchUrl(url, opts = {}) {
     }
   }
 
-  await rename(tmpDest, dest)
+  renameSync(tmpDest, dest)
   return { path: dest, filename }
 }
 
@@ -244,10 +243,10 @@ async function fetchUrl(url, opts = {}) {
  * @param {string} id - Model ID
  * @param {object} entry - { repo, format, description, files: [{name, sha256?, url?}], revision? }
  */
-function registerModel(id, entry) {
+async function registerModel(id, entry) {
   const reg = loadRegistry()
   reg.models[id] = entry
-  writeFileSync(REGISTRY_PATH, JSON.stringify(reg, null, 2) + '\n')
+  await Bun.write(REGISTRY_PATH, JSON.stringify(reg, null, 2) + '\n')
   _registry = reg
 }
 

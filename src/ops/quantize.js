@@ -33,15 +33,15 @@ function quantizeQ4(weight) {
       // Compute scale and zero-point for 4-bit [0, 15] range
       const range = maxVal - minVal
       const scale = range > 0 ? range / 15 : 1
-      const zero = range > 0 ? -minVal / scale : 0
+      const zero = range > 0 ? -minVal / scale : 8
 
       const groupIdx = g * N + col
       const offset = groupIdx * GROUP_BYTES
 
       // Pack nibbles
+      const validK = kEnd - kStart
       for (let k = 0; k < GROUP_SIZE; k++) {
-        const kIdx = kStart + k
-        const v = kIdx < K ? weight.data[kIdx * N + col] : 0
+        const v = k < validK ? weight.data[(kStart + k) * N + col] : 0
         const q = Math.round(Math.min(15, Math.max(0, v / scale + zero)))
         const byteIdx = offset + (k >> 1)
         if (k & 1) {

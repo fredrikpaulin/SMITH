@@ -58,21 +58,21 @@ function rmsnormBackward(gradOut, input, gamma, eps = 1e-5) {
   // gradGamma: CPU accumulation (sum over rows of gradOut * x * rms_inv)
   const gradGamma = T.create(gamma.shape, gamma.dtype)
   const ggAcc = new Float32Array(cols)
+  const goData = gradOut.data
+  const inData = input.data
   for (let r = 0; r < rows; r++) {
-    // Recompute rms for this row
     let sumSq = 0
+    const base = r * cols
     for (let c = 0; c < cols; c++) {
-      const v = T.getValue(input, r * cols + c)
+      const v = inData[base + c]
       sumSq += v * v
     }
     const rmsInv = 1 / Math.sqrt(sumSq / cols + eps)
     for (let c = 0; c < cols; c++) {
-      ggAcc[c] += T.getValue(gradOut, r * cols + c) * T.getValue(input, r * cols + c) * rmsInv
+      ggAcc[c] += goData[base + c] * inData[base + c] * rmsInv
     }
   }
-  for (let c = 0; c < cols; c++) {
-    T.setValue(gradGamma, c, ggAcc[c])
-  }
+  gradGamma.data.set(ggAcc)
 
   return { gradInput, gradGamma }
 }

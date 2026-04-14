@@ -8,6 +8,9 @@ function reshape(input, newShape) {
   // Handle -1 (infer one dimension)
   const neg = newShape.indexOf(-1)
   if (neg !== -1) {
+    if (newShape.lastIndexOf(-1) !== neg) {
+      throw new Error(`reshape: only one dimension can be -1, got [${newShape}]`)
+    }
     let known = 1
     for (let i = 0; i < newShape.length; i++) if (i !== neg) known *= newShape[i]
     newShape = newShape.slice()

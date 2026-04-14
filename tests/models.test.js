@@ -143,8 +143,8 @@ describe('registerModel', () => {
     try { rmSync(join(MODELS_DIR, testId), { recursive: true }) } catch {}
   })
 
-  test('adds a model to the registry', () => {
-    registerModel(testId, {
+  test('adds a model to the registry', async () => {
+    await registerModel(testId, {
       format: 'safetensors',
       description: 'Test model for unit tests',
       files: [{ name: 'test.safetensors' }],
@@ -279,7 +279,7 @@ describe('fetchModel', () => {
   const testHash = createHash('sha256').update(testContent).digest('hex')
   const testId = '__test_fetch_registry'
 
-  beforeAll(() => {
+  beforeAll(async () => {
     server = Bun.serve({
       port: 0,
       fetch(req) {
@@ -295,7 +295,7 @@ describe('fetchModel', () => {
     })
 
     // Register a test model pointing to our mock server
-    registerModel(testId, {
+    await registerModel(testId, {
       repo: 'test/model',
       format: 'safetensors',
       description: 'Test model for fetchModel tests',

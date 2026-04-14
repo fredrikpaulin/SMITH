@@ -116,7 +116,13 @@ function addGrad(v, g) {
   }
   // Ensure contiguous layout — transposed views have physical data in wrong order
   grad = T.contiguous(grad)
-  v.grad = v.grad ? gpuAdd(v.grad, grad) : grad
+  if (v.grad) {
+    const oldGrad = v.grad
+    v.grad = gpuAdd(oldGrad, grad)
+    T.release(oldGrad)
+  } else {
+    v.grad = grad
+  }
 }
 
 // --- Autograd operations ---
@@ -454,13 +460,15 @@ function crossEntropy(logits, targets) {
     _backward: _noGrad ? null : (grad) => {
       // Gradient = softmax(logits) - one_hot(targets), scaled by 1/batch * grad
       const probs = gpuSoftmax(logitsData, 1)
-      // Modify probs in-place (subtract 1 from target positions, scale)
+      const probsCopy = T.create(probs.shape, probs.dtype)
+      probsCopy.data.set(probs.data)
+      T.release(probs)
       const g = grad.data ? grad.data[0] : 1
       const s = g / batch
       for (let i = 0; i < batch; i++) {
-        probs.data[i * vocab + targets[i]] -= 1
+        probsCopy.data[i * vocab + targets[i]] -= 1
       }
-      addGrad(logits, gpuScale(probs, s))
+      addGrad(logits, gpuScale(probsCopy, s))
     },
   })
 }

@@ -2,7 +2,8 @@
 // Integration test: loads a real GGUF model (Nemotron-H 4B Q4_K_M) and validates
 // parsing, metadata extraction, tensor dequantization across all quant types.
 
-import { test, expect } from 'bun:test'
+import { test, expect, describe, beforeAll } from 'bun:test'
+import { existsSync } from 'fs'
 import {
   parseGGUF, extractConfig, listTensors, readTensorData, dequantizeTensor,
   GGML_TYPE, GGML_TYPE_NAME, GGML_TYPE_INFO,
@@ -12,20 +13,25 @@ import {
 import { modelPath } from '../src/models.js'
 
 const MODEL_PATH = modelPath('nemotron-4b-q4') || 'models/NVIDIA-Nemotron3-Nano-4B-Q4_K_M.gguf'
+const HAS_MODEL = existsSync(MODEL_PATH)
 
 // Parse once, reuse across tests
 let parsed, config
 
-test('parse GGUF file', async () => {
-  const buf = await Bun.file(MODEL_PATH).arrayBuffer()
-  parsed = parseGGUF(buf)
+describe.skipIf(!HAS_MODEL)('gguf_model', () => {
+  beforeAll(async () => {
+    const buf = await Bun.file(MODEL_PATH).arrayBuffer()
+    parsed = parseGGUF(buf)
+    config = extractConfig(parsed.metadata)
+  }, 120_000)
 
-  expect(parsed.version).toBeGreaterThanOrEqual(2)
-  expect(parsed.version).toBeLessThanOrEqual(3)
-  expect(parsed.tensors.length).toBeGreaterThan(0)
-  expect(parsed.metadata).toBeDefined()
-  expect(parsed.dataOffset).toBeGreaterThan(0)
-})
+  test('parse GGUF file', () => {
+    expect(parsed.version).toBeGreaterThanOrEqual(2)
+    expect(parsed.version).toBeLessThanOrEqual(3)
+    expect(parsed.tensors.length).toBeGreaterThan(0)
+    expect(parsed.metadata).toBeDefined()
+    expect(parsed.dataOffset).toBeGreaterThan(0)
+  })
 
 // =====================================================================
 // Metadata and config extraction
@@ -37,8 +43,6 @@ test('extract architecture', () => {
 })
 
 test('extract config', () => {
-  config = extractConfig(parsed.metadata)
-
   expect(config.arch).toBe('nemotron_h')
   expect(config.vocabSize).toBe(131072)
   expect(config.dim).toBe(3136)
@@ -387,4 +391,5 @@ test('model has all components needed for Mamba-2 implementation', () => {
     const hasSsm = parsed.tensors.some(t => t.name === `blk.${layer}.ssm_a`)
     expect(hasSsm).toBe(true)
   }
+})
 })

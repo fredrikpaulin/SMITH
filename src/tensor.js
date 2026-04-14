@@ -67,6 +67,7 @@ function create(shape, dtype = 'f32', mode = device.SHARED) {
     dtype,
     size,
     offset: 0,
+    mode,
   }
   trackAllocation(t)
   return t
@@ -188,7 +189,7 @@ function toString(t) {
 
 function release(t) {
   if (t.buffer) {
-    poolFree(t.buffer, t.size * dtypeBytes(t.dtype))
+    poolFree(t.buffer, t.size * dtypeBytes(t.dtype), t.mode)
     t.buffer = null
     t.data = null
   }
